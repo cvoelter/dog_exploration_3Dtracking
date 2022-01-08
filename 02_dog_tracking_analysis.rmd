@@ -1,0 +1,1391 @@
+---
+title: "02_dog_tracking_analysis"
+author: "Christoph Voelter"
+date: "09/04/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(summarytools)
+library(ggthemes)
+library(lubridate)
+library(glmmTMB)
+
+source("./functions/diagnostic_fcns.r")
+source("./functions/glmm_stability.r")
+source("./functions/boot_glmm2.r")
+source("./functions/glmmTMB_stability.r")
+source("./functions/drop1_para_glmmtmb.r")
+source("./functions/extract_ranef_gmmTMB.r")
+```
+
+Notes: Pruning of the models in case of convergence issues in the following order:
+- remove random slope of control variable trial number
+- remove control predictors:  sex, age
+- remove random slopes of test predictors
+
+
+Aggregate survey data
+```{r}
+survey.data<-read.csv(file="data/survey/results-survey293218_numeric_response.csv")%>%
+  filter(lastpage>2, token!=111)
+
+survey.data_agg<-survey.data%>%
+  mutate(survey_token=token)%>%
+  rowwise(survey_token)%>%
+  summarise(cBARQ_nonsocial_fear=mean(c(Three38, Three41, Three42, Three44, Three47, Three48), na.rm = TRUE), cBARQ_stranger_fear=mean(c(Three36, Three37, Three39, Three40),na.rm=TRUE), cBARQ_separation_problems= mean(c(Four54, Four55, Four56, Four57, Four58, Four59, Four60, Four61), na.rm = TRUE), cBARQ_attachment_problems = mean(c(Six68, Six69, Six70, Six71, Six72, Six73), na.rm = TRUE), cBARQ_sep_attach = mean(c(Four54, Four55, Four56, Four57, Four58, Four59, Four60, Four61, Six68, Six69, Six70, Six71, Six72, Six73), na.rm = TRUE))
+```
+Load data
+```{r}
+demographics.data<-read.csv(file="data/dog_tracking_project_data.csv")%>%
+  mutate(subject=tolower(dog_name))%>%
+  mutate(subject=fct_recode(subject, mira="mira3"))%>%
+  mutate(condition=ifelse(condition_id=="pp","bp",ifelse(condition_id=="pa", "op", ifelse(condition_id=="ap", "sp", ifelse(condition_id=="aa", "np",NA)))))
+
+xdata<-read.csv(file="data/distance_travelled_summary_data.csv")%>%
+  select(-X)%>%
+  inner_join(demographics.data)%>%
+  inner_join(survey.data_agg)%>%
+  rename(keypoint=name)%>%
+  mutate(mean.distance.owner.chair=as.numeric(ifelse(owner_chair=="window", mean.distance.chair.window, ifelse(owner_chair=="door", mean.distance.chair.door,""))), mean.distance.stranger.chair=as.numeric(ifelse(stranger_chair=="window", mean.distance.chair.window, ifelse(stranger_chair=="door", mean.distance.chair.door,""))), 
+         min.distance.owner.chair=as.numeric(ifelse(owner_chair=="window", min.distance.chair.window, ifelse(owner_chair=="door", min.distance.chair.door, ""))), 
+         min.distance.stranger.chair=as.numeric(ifelse(stranger_chair=="window", min.distance.chair.window, ifelse(stranger_chair=="door", min.distance.chair.door, ""))))%>%
+  rowwise()%>%
+  mutate(average.min.object.distance=mean(c(min.distance.obj.wl, min.distance.obj.wr,min.distance.obj.dl, min.distance.obj.dr), na.rm = TRUE))%>%
+    mutate(test_date=as.Date(test_date, tryFormats = c("%d.%m.%Y")), date_of_birth=as.Date(date_of_birth, tryFormats = c("%d.%m.%Y")), age=test_date-date_of_birth)
+
+view(dfSummary(xdata))
+
+
+```
+
+
+### Proportion of tracked data 
+```{r}
+#proportion of tracked data by keypoint
+xdata%>%
+  group_by(keypoint)%>%
+  summarise(mean(prop_tracked_data),median(prop_tracked_data), min(prop_tracked_data),max(prop_tracked_data), mean(median_err))
+```
+
+## Head centre data
+
+```{r}
+library(lme4)
+snout.data<-xdata%>%filter(keypoint=="snout")
+hc.data<-xdata%>%filter(keypoint=="head_centre")
+
+hc.data$stranger_presence<-as.factor(hc.data$stranger_presence)
+hc.data$owner_presence<-as.factor(hc.data$owner_presence)
+hc.data$z.trial<-scale(hc.data$trial_number, center = TRUE, scale=TRUE)
+hc.data$z.age<-scale(hc.data$age, center = TRUE, scale=TRUE)
+hc.data$z.cBARQ_separation_problems<-scale(hc.data$cBARQ_separation_problems, center = TRUE, scale=TRUE)
+hc.data$z.cBARQ_sep_attach<-scale(hc.data$cBARQ_sep_attach, center = TRUE, scale=TRUE)
+hc.data$z.cBARQ_nonsocial_fear<-scale(hc.data$cBARQ_nonsocial_fear, center = TRUE, scale=TRUE)
+
+#view(dfSummary(hc.data))
+
+hist(hc.data$cBARQ_nonsocial_fear)
+hist(hc.data$cBARQ_attachment_problems)
+hist(hc.data$cBARQ_sep_attach)
+hist(hc.data$distance.sum)
+hist(log(snout.data$distance.sum))
+hist(log(hc.data$distance.sum))
+hist(hc.data$z.trial)
+```
+
+
+
+## travelled distance
+
+```{r}
+mm1<-lmer(log(distance.sum)~owner_presence:stranger_presence+owner_presence+
+            stranger_presence+z.trial+sex+z.age+
+            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+
+
+mm1.null<-lmer(log(distance.sum)~z.trial+sex+z.age+
+            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+
+anova(mm1, mm1.null,  test = "Chisq")
+```
+
+
+```{r}
+diagnostics.plot(mm1, size.fac=2)
+
+ranef.diagn.plot(mm1)
+```
+
+```{r}
+drop1(mm1, test="Chisq")
+```
+
+
+```{r}
+hc.data$log.distance.sum<-log(hc.data$distance.sum)
+
+mm2<-lmer(log.distance.sum~owner_presence+stranger_presence+
+            z.trial+sex+z.age+
+            (1+owner_presence+stranger_presence|subject), data=hc.data, weights=1/prop_tracked_data, REML=FALSE)
+
+
+mm2.null<-lmer(log.distance.sum~z.trial+sex+z.age+
+            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+
+anova(mm2, mm2.null,  test = "Chisq")
+```
+
+
+```{r}
+summary(mm2)
+```
+
+
+```{r}
+drop1_mm2<-drop1(mm2, test="Chisq")
+drop1_mm2
+```
+
+```{r}
+diagnostics.plot(mm2, size.fac=2)
+
+ranef.diagn.plot(mm2)
+```
+
+```{r}
+library(car)
+xx=lm(log(distance.sum)~owner_presence+stranger_presence+cBARQ_separation_problems+z.cBARQ_nonsocial_fear+z.trial+z.age+sex, data=hc.data)
+vif(xx)
+```
+relative model complexity
+```{r}
+length(residuals(mm2))/
+(length(fixef(mm2))+
+nrow(as.data.frame(summary(mm2)$varcor)))
+```
+model stability
+```{r}
+
+mm2.stab=glmm.model.stab(model.res=mm2, contr=NULL, para=F, data=NULL)
+
+mm2.stab$summary
+
+m.stab.plot(round(mm2.stab$summary[, -1], 3))
+```
+--> model stable with regard to the fixed effects
+
+```{r}
+boot.full=boot.glmm.pred(model.res=mm2, excl.warnings=F,
+nboots=1000, para=T, n.cores=3, resol=1000, level=0.95)
+
+mm2_boot_ci<-boot.full$ci.estimates
+```
+### effect size
+```{r}
+library(MuMIn)
+r.squaredGLMM(mm2)
+```
+
+
+### output table
+
+```{r}
+
+
+model_table_distance <- bind_cols(as.data.frame(summary(mm2)$coefficients),
+                         drop1_mm2,
+                         mm2_boot_ci) %>% #mm2_boot_ci<-boot.full$ci.estimates
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = npar, p = `Pr(Chi)`) %>%
+  mutate(across(.cols = c(p), ~ round(.x, 3))) %>% 
+  mutate(across(.cols = c(Estimate:Chi2), ~ round(.x, 2))) %>% 
+  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+mutate(p=replace(p, p==0, "<0.001"))
+
+write.csv(model_table_distance , file = "saves/distance_mm2_output_table.csv")
+```
+
+
+## Tail wagging 
+
+
+```{r}
+
+prop.tracked.data<-xdata%>%
+  filter(keypoint=="tail_base" | keypoint=="tail_tip")%>%
+  group_by(subject, condition)%>%
+  summarise(mean_prop_tracked_data=mean(prop_tracked_data))
+
+
+tail.tip.data<-xdata%>%
+  filter(keypoint=="tail_base" | keypoint=="tail_tip")%>%
+  select(subject, keypoint, distance.sum, owner_presence, stranger_presence, condition, trial_number, sex, age, cBARQ_sep_attach )%>%
+  pivot_wider(names_from = keypoint, values_from=distance.sum)%>%
+  mutate(tail_tip_diff=tail_tip-tail_base, tail_tip_ratio=tail_tip/tail_base, tail_tip_scaled=tail_tip_ratio/max(tail_tip_ratio))%>%
+  left_join(prop.tracked.data)
+
+hist((tail.tip.data$tail_tip_ratio))
+hist((tail.tip.data$tail_tip_diff))
+hist((tail.tip.data$tail_tip_scaled))
+hist(log(tail.tip.data$tail_tip_ratio))
+```
+
+
+
+```{r}
+tail.tip.data$stranger_presence<-as.factor(tail.tip.data$stranger_presence)
+tail.tip.data$owner_presence<-as.factor(tail.tip.data$owner_presence)
+tail.tip.data$z.trial<-scale(tail.tip.data$trial_number, center = TRUE, scale=TRUE)
+tail.tip.data$z.age<-scale(tail.tip.data$age, center = TRUE, scale=TRUE)
+tail.tip.data$z.cBARQ_sep_attach<-scale(tail.tip.data$cBARQ_sep_attach, center = TRUE, scale=TRUE)
+
+##code to remove 1 and 0 from the distribution of the response variable
+tail.tip.data$resp <- (tail.tip.data$tail_tip_scaled*(length(tail.tip.data$tail_tip_scaled) - 1) + 0.5)/length(tail.tip.data$tail_tip_scaled) 
+
+tail.tip.data<-tail.tip.data%>%drop_na(resp)
+view(dfSummary(tail.tip.data))
+
+max(tail.tip.data$resp)
+```
+
+
+```{r}
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+mm3=glmmTMB(resp~owner_presence*stranger_presence+
+            z.trial+z.age+sex+
+            (1|subject)+#pruned due to convergence issues:
+              (0+owner_presence|subject)+#(0+stranger_presence|subject) +
+            (0+z.trial|subject),
+            weights=1/mean_prop_tracked_data, family=beta_family, data=tail.tip.data,
+      control=glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000)))
+
+mm3.null=glmmTMB(resp~z.trial+sex+z.age+
+            (1|subject)+(0+owner_presence|subject)+
+              (0+z.trial|subject), weights=1/mean_prop_tracked_data, family=beta_family, data=tail.tip.data,
+      control=contr)
+
+anova(mm3, mm3.null,  test = "Chisq")
+summary(mm3)
+```
+
+```{r}
+overdisp.test(mm3)
+```
+
+```{r}
+tail.mm3.drop1<-as.data.frame(drop1(mm3, test="Chisq", control=contr))
+tail.mm3.drop1<-tail.mm3.drop1%>%filter(!is.na(Df))%>%add_row(Df = rep(NA,3),  .before = 1)
+tail.mm3.drop1
+```
+
+
+### Relevelling of reference categories of treatments to perform post-hoc tests
+
+```{r}
+tail.tip.data$owner_presence.rel<-relevel(tail.tip.data$owner_presence, ref = "p")
+levels(tail.tip.data$owner_presence.rel)
+tail.tip.data$stranger_presence.rel<-relevel(tail.tip.data$stranger_presence, ref = "p")
+levels(tail.tip.data$stranger_presence.rel)
+
+mm3.2=glmmTMB(resp~owner_presence.rel*stranger_presence.rel+
+            z.trial+z.age+sex+
+            (1|subject)+ (0+owner_presence|subject)+
+            (0+z.trial|subject),
+            weights=1/mean_prop_tracked_data, family=beta_family, data=tail.tip.data,
+      control=glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000)))
+
+drop1(mm3.2, test="Chisq", control=contr)
+
+summary(mm3.2)
+```
+
+```{r}
+mm3.3=glmmTMB(resp~owner_presence.rel*stranger_presence+
+            z.trial+z.age+sex+
+            (1|subject)+ (0+owner_presence|subject)+
+            (0+z.trial|subject),
+            weights=1/mean_prop_tracked_data, family=beta_family, data=tail.tip.data,
+      control=glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000)))
+
+drop1(mm3.3, test="Chisq", control=contr)
+
+summary(mm3.3)
+```
+
+
+
+```{r}
+mm3_tail.ci=boot.glmmtmb(mm3,tail.tip.data, nboots=1000, para=T, n.cores = "all-1", )
+
+```
+
+### output table
+
+```{r}
+model_tail_cis=grepl(x=rownames(mm3_tail.ci$ci.estimates$fe), pattern="@cond")
+
+model_table_tail<- bind_cols(as.data.frame(summary(mm3)$coefficients$cond),
+                             tail.mm3.drop1,
+                             mm3_tail.ci$ci.estimates$fe[1:7,]) %>%
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
+  mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
+  mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
+  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+mutate(p=replace(p, p==0, "<0.001"))
+
+write.csv(model_table_tail, file = "saves/tail_mm3_output_table.csv")
+```
+
+```{r}
+ggplot(data=tail.tip.data, aes(x=condition , y=tail_tip_scaled))+
+  geom_boxplot()+
+  geom_jitter()+
+  theme_bw()
+
+
+```
+
+--> dogs move their tail more when either the owner or the stranger are present compared to the both absent condition. In the presence of one of the two (stranger or owner) the presence of the other one did not matter. 
+
+## Area covered
+
+```{r}
+hc.data$stranger_presence<-as.factor(hc.data$stranger_presence)
+hc.data$owner_presence<-as.factor(hc.data$owner_presence)
+hc.data$z.trial<-scale(hc.data$trial_number, center = TRUE, scale=TRUE)
+hc.data$z.age<-scale(hc.data$age, center = TRUE, scale=TRUE)
+hc.data$z.cBARQ_separation_problems<-scale(hc.data$cBARQ_separation_problems, center = TRUE, scale=TRUE)
+hc.data$z.cBARQ_sep_attach<-scale(hc.data$cBARQ_sep_attach, center = TRUE, scale=TRUE)
+hc.data$z.cBARQ_nonsocial_fear<-scale(hc.data$cBARQ_nonsocial_fear, center = TRUE, scale=TRUE)
+
+hist(hc.data$cBARQ_nonsocial_fear)
+hist(hc.data$cBARQ_sep_attach)
+hist(hc.data$distance.sum)
+hist(hc.data$z.trial)
+
+hist(hc.data$area_covered)
+min(hc.data$area_covered)
+max(hc.data$area_covered)
+view(dfSummary(hc.data))
+```
+
+
+
+```{r}
+p1<-ggplot(data=hc.data, aes(x=condition, y=area_covered))+
+  geom_jitter()+
+  geom_violin(alpha=0.2)
+p1
+```
+
+
+
+
+```{r}
+## code to run the model
+hc.data$prop_tracked_data_inv<-1/hc.data$prop_tracked_data
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+
+mm1_area=glmmTMB(area_covered~owner_presence*stranger_presence+
+            z.trial+z.age+sex+
+            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)
+
+mm1_area_null=glmmTMB(area_covered~1+
+            z.trial+z.age+sex+
+            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)
+
+anova(mm1_area, mm1_area_null, test="Chisq")
+
+```
+
+
+```{r}
+overdisp.test(mm1_area)
+
+summary(mm1_area)
+
+drop1(mm1_area, test="Chisq")#convergence problems
+```
+
+```{r}
+library(car)
+xx=lm(area_covered~owner_presence+stranger_presence+z.trial+z.age+sex + z.cBARQ_sep_attach, data=hc.data)
+vif(xx)
+```
+
+
+Drop interaction
+```{r}
+## code to run the model
+hc.data$prop_tracked_data_inv<-1/hc.data$prop_tracked_data
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+
+mm2_area=glmmTMB(area_covered~owner_presence+stranger_presence+            z.trial+z.age+sex+
+            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject),
+           #(0+z.trial|subject), #pruned due to convergence issues
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)
+
+mm2_area_null=glmmTMB(area_covered~z.trial+z.age+sex+
+            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)
+
+anova(mm2_area, mm2_area_null, test="Chisq")
+
+overdisp.test(mm2_area)
+
+summary(mm2_area)
+```
+
+
+
+
+```{r}
+drop1(mm2_area, test="Chisq",  control=contr)#convergence problems
+```
+
+### output table
+
+```{r}
+
+
+model_table_area <- bind_cols(as.data.frame(summary(mm2_area)$coefficients$cond)) %>% 
+  select(Estimate, SE = `Std. Error`, `z value`, p = `Pr(>|z|)`) %>%
+  mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
+  mutate(across(.cols = c(Estimate:`z value`), ~ format(round(.x, 2), nsmall=2))) %>% 
+  #mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+mutate(p=replace(p, p==0, "<0.001"))
+
+write.csv(model_table_area, file = "saves/area_mm2_output_table.csv")
+```
+
+
+### Average minimal distance from objects
+
+```{r}
+max.average.min.object.distance<-max(hc.data$average.min.object.distance)
+
+hc.data<-hc.data%>%
+  mutate(average.min.object.distance.scaled=average.min.object.distance/max.average.min.object.distance)
+
+
+hc.data$average.min.object.distance.scaled <- (hc.data$average.min.object.distance.scaled*(length(hc.data$average.min.object.distance.scaled) - 1) + 0.5)/length(hc.data$average.min.object.distance.scaled) 
+
+
+max(hc.data$average.min.object.distance.scaled)
+hist(log(hc.data$average.min.object.distance))
+
+```
+
+
+```{r}
+ggplot(data=hc.data, aes(x=condition, y=average.min.object.distance.scaled))+
+  geom_violin()+
+  geom_jitter()+
+  theme_bw()
+```
+```{r}
+
+hc.data$log.average.min.object.distance=log(hc.data$average.min.object.distance)
+
+mm1_obj_dist_lmer<-lmer(log.average.min.object.distance~owner_presence*stranger_presence
+            +z.trial+z.age+sex+
+            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+
+
+mm1_obj_dist_lmer_null<-lmer(log.average.min.object.distance~z.trial+z.age+sex+
+            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+
+anova(mm1_obj_dist_lmer, mm1_obj_dist_lmer_null,  test = "Chisq")
+```
+
+```{r}
+diagnostics.plot(mm1_obj_dist_lmer, size.fac=2)
+
+ranef.diagn.plot(mm1_obj_dist_lmer)
+```
+
+```{r}
+summary(mm1_obj_dist_lmer)
+drop1_mm1_obj_distance_lmer<-drop1(mm1_obj_dist_lmer, test="Chisq")
+drop1_mm1_obj_distance_lmer
+```
+Model refitted without the interaction term
+```{r}
+
+
+mm2_obj_dist_lmer<-lmer(log.average.min.object.distance~owner_presence+stranger_presence
+            +z.trial+z.age+sex+
+            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+
+
+mm2_obj_dist_lmer_null<-lmer(log.average.min.object.distance~z.trial+z.age+sex+
+            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+
+anova(mm2_obj_dist_lmer, mm2_obj_dist_lmer_null,  test = "Chisq")
+```
+
+```{r}
+diagnostics.plot(mm2_obj_dist_lmer, size.fac=2)
+
+ranef.diagn.plot(mm2_obj_dist_lmer)
+```
+
+```{r}
+drop1_mm2_obj_distance_lmer<-drop1(mm2_obj_dist_lmer, test="Chisq")
+drop1_mm2_obj_distance_lmer
+```
+
+
+```{r}
+library(car)
+xx=lm(log.average.min.object.distance~owner_presence+stranger_presence+cBARQ_separation_problems+z.cBARQ_nonsocial_fear+z.trial+z.age+sex, data=hc.data)
+vif(xx)
+```
+
+model stability
+```{r}
+
+mm1.min.obj.stab=glmm.model.stab(model.res=mm2_obj_dist_lmer, contr=NULL, para=F, data=NULL)
+
+mm1.min.obj.stab$summary
+
+m.stab.plot(round(mm1.min.obj.stab$summary[, -1], 3))
+```
+--> model stable with regard to the fixed effects
+
+```{r}
+boot.full.mm2_obj_dist_lmer=boot.glmm.pred(model.res=mm2_obj_dist_lmer, excl.warnings=F,
+nboots=1000, para=T, n.cores=3, resol=1000, level=0.95)
+
+mm2_obj_dist_lmer_boot_ci<-boot.full.mm2_obj_dist_lmer$ci.estimates
+```
+### effect size
+```{r}
+library(MuMIn)
+r.squaredGLMM(mm2_obj_dist_lmer)
+```
+
+
+### output table
+
+```{r}
+
+
+model_table_min_obj_distance <- bind_cols(as.data.frame(summary(mm2_obj_dist_lmer)$coefficients),
+                         drop1_mm2_obj_distance_lmer,
+                         mm2_obj_dist_lmer_boot_ci) %>% #mm2_boot_ci<-boot.full$ci.estimates
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = npar, p = `Pr(Chi)`) %>%
+  mutate(across(.cols = c(p), ~ round(.x, 3))) %>% 
+  mutate(across(.cols = c(Estimate:Chi2), ~ round(.x, 2))) %>% 
+  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+mutate(p=replace(p, p==0, "<0.001"))
+
+write.csv(model_table_min_obj_distance , file = "saves/minimal_obj_distance_mm2_output_table.csv")
+```
+
+## Visual angle analysis
+
+```{r}
+
+
+hc.data<-xdata%>%filter(keypoint=="head_centre")
+hc.data$stranger_presence<-as.factor(hc.data$stranger_presence)
+hc.data$owner_presence<-as.factor(hc.data$owner_presence)
+hc.data$z.trial<-scale(hc.data$trial_number, center = TRUE, scale=TRUE)
+hc.data$z.age<-scale(hc.data$age, center = TRUE, scale=TRUE)
+hc.data$z.cBARQ_separation_problems<-scale(hc.data$cBARQ_separation_problems, center = TRUE, scale=TRUE)
+hc.data$z.cBARQ_sep_attach<-scale(hc.data$cBARQ_sep_attach, center = TRUE, scale=TRUE)
+hc.data$z.cBARQ_nonsocial_fear<-scale(hc.data$cBARQ_nonsocial_fear, center = TRUE, scale=TRUE)
+
+
+hist(hc.data$prop_look_owner_chair)
+hist(hc.data$mean_vis_angle_owner)
+hc.data$mean_vis_angle_owner_scaled<-hc.data$mean_vis_angle_owner/pi
+hist(hc.data$mean_vis_angle_owner_scaled)
+min(hc.data$mean_vis_angle_owner_scaled)
+hc.data$mean_vis_angle_stranger_scaled<-hc.data$mean_vis_angle_stranger/pi
+min(hc.data$mean_vis_angle_stranger_scaled)
+
+
+view(dfSummary(hc.data))
+
+
+cor.test(hc.data$mean_vis_angle_owner, hc.data$mean_vis_angle_stranger)
+plot(hc.data$mean_vis_angle_owner, hc.data$mean_vis_angle_stranger)
+
+```
+
+
+
+#### mean visual angle 
+```{r}
+ggplot(data=hc.data, aes(x=condition, y=mean_vis_angle_owner_scaled))+
+  geom_boxplot()+
+  geom_violin(alpha=0.2)
+
+```
+
+
+```{r}
+## code to run the model
+hc.data$prop_tracked_data_inv<-1/hc.data$prop_tracked_data
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+
+mm1_owner_vis_angle=glmmTMB(mean_vis_angle_owner_scaled~owner_presence*stranger_presence+
+            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject), 
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)
+
+mm1_owner_vis_angle_null=glmmTMB(mean_vis_angle_owner_scaled~
+            1+
+            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject), 
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)
+
+anova(mm1_owner_vis_angle_null, mm1_owner_vis_angle, test="Chisq")
+#not significant
+
+overdisp.test(mm1_owner_vis_angle)
+
+```
+
+
+## Duration in owner proximity
+
+```{r}
+hc.data$stranger_presence<-as.factor(hc.data$stranger_presence)
+hc.data$owner_presence<-as.factor(hc.data$owner_presence)
+hc.data$z.trial<-scale(hc.data$trial_number, center = TRUE, scale=TRUE)
+
+hist(hc.data$z.trial)
+
+hist(hc.data$prop_duration_owner)
+min(hc.data$prop_duration_owner)
+max(hc.data$prop_duration_owner)
+view(dfSummary(hc.data))
+```
+
+
+
+```{r}
+p1<-ggplot(data=hc.data, aes(x=condition, y=prop_duration_owner))+
+  geom_jitter()+
+  geom_violin(alpha=0.2)
+p1
+```
+
+
+
+
+```{r}
+## code to run the model
+hc.data$prop_tracked_data_inv<-1/hc.data$prop_tracked_data
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+
+hc.data$prop_duration_owner.scaled <- (hc.data$prop_duration_owner*(length(hc.data$prop_duration_owner) - 1) + 0.5)/length(hc.data$prop_duration_owner) 
+
+
+mm1_duration_owner=glmmTMB(prop_duration_owner.scaled ~owner_presence*stranger_presence+ z.trial+z.age+sex+
+            (1|subject)+ (0+owner_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+
+mm1_duration_owner_null=glmmTMB(prop_duration_owner.scaled~1+
+            z.trial+z.age+
+            (1|subject)+ (0+owner_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)
+
+anova(mm1_duration_owner, mm1_duration_owner_null, test="Chisq")
+summary(mm1_duration_owner)
+```
+
+
+```{r}
+overdisp.test(mm1_duration_owner)
+
+summary(mm1_duration_owner)
+
+drop1(mm1_duration_owner, test="Chisq")
+```
+
+
+```{r}
+library(car)
+xx=lm(prop_duration_owner.scaled~owner_presence+stranger_presence+z.trial+z.age+sex, data=hc.data)
+vif(xx)
+```
+```{r}
+
+mm2_duration_owner=glmmTMB(prop_duration_owner.scaled ~owner_presence+stranger_presence+ z.trial+z.age+sex+
+            (1|subject)+ (0+owner_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+anova(mm2_duration_owner, mm1_duration_owner_null, test="Chisq")
+summary(mm2_duration_owner)
+```
+
+
+```{r}
+drop1(mm2_duration_owner, test="Chisq",  control=contr)#convergence problems
+```
+### output table
+```{r}
+model_duration_owner <- bind_cols(as.data.frame(summary(mm2_duration_owner)$coefficients$cond)) %>% 
+  select(Estimate, SE = `Std. Error`, `z value`, p = `Pr(>|z|)`) %>%
+  mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
+  mutate(across(.cols = c(Estimate:`z value`), ~ format(round(.x, 2), nsmall=2)))%>% 
+mutate(p=replace(p, p==0, "<0.001"))
+
+write.csv(model_duration_owner, file = "saves/duration_owner_mm2_output_table.csv")
+```
+
+
+
+
+## Duration in stranger proximity
+
+```{r}
+hc.data$stranger_presence<-as.factor(hc.data$stranger_presence)
+hc.data$owner_presence<-as.factor(hc.data$owner_presence)
+hc.data$z.trial<-scale(hc.data$trial_number, center = TRUE, scale=TRUE)
+
+hist(hc.data$z.trial)
+
+hist(hc.data$prop_duration_stranger)
+min(hc.data$prop_duration_stranger)
+max(hc.data$prop_duration_stranger)
+view(dfSummary(hc.data))
+```
+
+
+
+```{r}
+p1<-ggplot(data=hc.data, aes(x=condition, y=prop_duration_stranger))+
+  geom_jitter()+
+  geom_violin(alpha=0.2)
+p1
+```
+
+
+
+
+```{r}
+## code to run the model
+hc.data$prop_tracked_data_inv<-1/hc.data$prop_tracked_data
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+
+hc.data$prop_duration_stranger.scaled <- (hc.data$prop_duration_stranger*(length(hc.data$prop_duration_stranger) - 1) + 0.5)/length(hc.data$prop_duration_stranger) 
+
+
+mm1_duration_stranger=glmmTMB(prop_duration_stranger.scaled~owner_presence*stranger_presence+ z.trial+
+            (1|subject)+ (0+owner_presence|subject)+ (0+stranger_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+
+mm1_duration_stranger_null=glmmTMB(prop_duration_stranger.scaled~ z.trial+
+            (1|subject)+ (0+owner_presence|subject)+ (0+stranger_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)
+
+anova(mm1_duration_stranger, mm1_duration_stranger_null, test="Chisq")
+summary(mm1_duration_stranger)
+```
+
+
+```{r}
+overdisp.test(mm1_duration_stranger)
+
+summary(mm1_duration_stranger)
+
+drop1(mm1_duration_stranger, test="Chisq")
+```
+
+
+```{r}
+library(car)
+xx=lm(prop_duration_stranger.scaled~owner_presence+stranger_presence+z.trial+z.age+sex, data=hc.data)
+vif(xx)
+```
+```{r}
+
+mm2_duration_stranger=glmmTMB(prop_duration_stranger.scaled ~owner_presence+stranger_presence+ z.trial+sex+
+            (1|subject)+ (0+owner_presence|subject)+ (0+stranger_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+
+mm2_duration_stranger_null=glmmTMB(prop_duration_stranger.scaled ~ z.trial+sex+
+            (1|subject)+ (0+owner_presence|subject)+ (0+stranger_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+anova(mm2_duration_stranger, mm2_duration_stranger_null, test="Chisq")
+summary(mm2_duration_stranger)
+```
+
+
+```{r}
+drop1(mm2_duration_stranger, test="Chisq",  control=contr)#convergence problems
+```
+
+### output table
+
+```{r}
+
+
+model_duration_stranger <- bind_cols(as.data.frame(summary(mm2_duration_stranger)$coefficients$cond)) %>% 
+  select(Estimate, SE = `Std. Error`, `z value`, p = `Pr(>|z|)`) %>%
+  mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
+  mutate(across(.cols = c(Estimate:`z value`), ~ format(round(.x, 2), nsmall=2))) %>% 
+  #mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+mutate(p=replace(p, p==0, "<0.001"))
+
+write.csv(model_duration_stranger, file = "saves/duration_stranger_mm2_output_table.csv")
+```
+
+
+## Duration in door proximity
+
+```{r}
+hc.data$stranger_presence<-as.factor(hc.data$stranger_presence)
+hc.data$owner_presence<-as.factor(hc.data$owner_presence)
+hc.data$z.trial<-scale(hc.data$trial_number, center = TRUE, scale=TRUE)
+
+hist(hc.data$z.trial)
+
+hist(hc.data$prop_duration_door)
+min(hc.data$prop_duration_door)
+max(hc.data$prop_duration_door)
+view(dfSummary(hc.data))
+```
+
+
+
+```{r}
+p1<-ggplot(data=hc.data, aes(x=condition, y=prop_duration_door))+
+  geom_jitter()+
+  geom_violin(alpha=0.2)
+p1
+```
+
+
+
+
+```{r}
+## code to run the model
+hc.data$prop_tracked_data_inv<-1/hc.data$prop_tracked_data
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+
+hc.data$prop_duration_door.scaled <- (hc.data$prop_duration_door*(length(hc.data$prop_duration_door) - 1) + 0.5)/length(hc.data$prop_duration_door) 
+
+
+mm1_duration_door=glmmTMB(prop_duration_door.scaled~owner_presence*stranger_presence+ z.trial+z.age + 
+            (1|subject)+ (0+owner_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+
+mm1_duration_door_null=glmmTMB(prop_duration_door.scaled~ z.age + 
+            (1|subject)+ (0+owner_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)
+
+anova(mm1_duration_door, mm1_duration_door_null, test="Chisq")
+summary(mm1_duration_door)
+```
+
+
+```{r}
+overdisp.test(mm1_duration_door)
+
+summary(mm1_duration_door)
+
+drop1(mm1_duration_door, test="Chisq")
+```
+
+
+```{r}
+library(car)
+xx=lm(prop_duration_door.scaled~owner_presence+stranger_presence+z.trial+z.age+sex, data=hc.data)
+vif(xx)
+```
+```{r}
+
+mm2_duration_door=glmmTMB(prop_duration_door.scaled ~owner_presence+stranger_presence+z.trial+
+            (1|subject)+ (0+owner_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+
+mm2_duration_door_null=glmmTMB(prop_duration_door.scaled ~ 1+
+            (1|subject)+ (0+owner_presence|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+anova(mm2_duration_door, mm2_duration_door_null, test="Chisq")
+summary(mm2_duration_door)
+```
+
+
+```{r}
+drop1(mm2_duration_door, test="Chisq",  control=contr)#convergence problems
+```
+
+### output table
+
+```{r}
+
+
+model_duration_door <- bind_cols(as.data.frame(summary(mm2_duration_door)$coefficients$cond)) %>% 
+  select(Estimate, SE = `Std. Error`, `z value`, p = `Pr(>|z|)`) %>%
+  mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
+  mutate(across(.cols = c(Estimate:`z value`), ~ format(round(.x, 2), nsmall=2)))%>% 
+  mutate(p=replace(p, p==0, "<0.001"))
+
+write.csv(model_duration_door, file = "saves/duration_door_mm2_output_table.csv")
+```
+
+
+
+
+### Correlation between behavioral data and survey
+```{r, fig.width=20, fig.height=20}
+
+cor.data<-xdata%>%
+  filter(keypoint=="head_centre")%>%
+  inner_join(tail.tip.data)%>%
+  select(subject, survey_token, condition, keypoint, prop_duration_owner, prop_duration_stranger, prop_duration_door, )%>%#average.min.object.distance,  distance.sum, area_covered, tail_tip_ratio
+  pivot_wider(names_from = c(condition), values_from=c(prop_duration_owner, prop_duration_stranger, prop_duration_door), names_sep = ".")%>%
+  inner_join(survey.data_agg)%>%
+  select(-survey_token, -subject,-keypoint, -cBARQ_sep_attach)%>%
+  rename_all(
+      funs(
+        stringr::str_replace_all(., '_', ' ')
+      )
+  )%>%
+    rename_all(
+      funs(
+        stringr::str_replace_all(., 'prop', 'prop.')%>%
+          stringr::str_replace_all(., 'vis', 'vis.')%>%
+           stringr::str_replace_all(., "door.", 'door : ')%>%
+           stringr::str_replace_all(., "stranger.", 'stranger : ')%>%
+           stringr::str_replace_all(., "owner.", 'owner : ')%>%
+           stringr::str_replace_all(., "stranger : fear", 'stranger fear')%>%
+         stringr::str_replace_all(., "cBARQ", 'C-BARQ')%>%
+         stringr::str_replace_all(., " bp", ' O+/S+')%>%
+         stringr::str_replace_all(., " np", ' O-/S-')%>%
+         stringr::str_replace_all(., " op", ' O+/S-')%>%
+         stringr::str_replace_all(., " sp", ' O-/S+')
+      )
+  )
+
+
+xdata%>%
+  filter(keypoint=="head_centre")%>%
+  inner_join(tail.tip.data)%>%
+  select(subject, survey_token, condition, keypoint, prop_duration_owner, prop_duration_stranger, prop_duration_door, )%>%#average.min.object.distance,  distance.sum, area_covered, tail_tip_ratio
+  pivot_wider(names_from = c(condition), values_from=c(prop_duration_owner, prop_duration_stranger, prop_duration_door), names_sep = ".")%>%
+  inner_join(survey.data_agg)%>%
+  summarise(round(mean(cBARQ_nonsocial_fear),2), round(sd(cBARQ_nonsocial_fear),2), round(min(cBARQ_nonsocial_fear),2), round(max(cBARQ_nonsocial_fear),2), 
+            round(mean(cBARQ_stranger_fear),2), round(sd(cBARQ_stranger_fear),2), round(min(cBARQ_stranger_fear),2), round(max(cBARQ_stranger_fear),2),
+            round(mean(cBARQ_separation_problems),2), round(sd(cBARQ_separation_problems),2), round(min(cBARQ_separation_problems),2), round(max(cBARQ_separation_problems),2),
+            round(mean(cBARQ_attachment_problems),2), round(sd(cBARQ_attachment_problems),2), round(min(cBARQ_attachment_problems),2), round(max(cBARQ_attachment_problems),2))
+
+summary(cor.data)
+library(summarytools)
+dfSummary(cor.data)
+
+library(ggcorrplot)
+corr <- cor(cor.data, use = "pairwise.complete.obs", method = "pearson")
+p.mat <- cor_pmat(cor.data, use = "pairwise.complete.obs",  method = "pearson")
+cormat.all.tasks<- ggcorrplot(corr, hc.order = FALSE,
+  sig.level = 0.05,
+  type = "lower",
+  p.mat = p.mat,
+  insig = c("pch"), pch = 4, pch.col = "black",
+  pch.cex = 5,
+  lab = TRUE,
+  digits = 2
+) +
+  scale_fill_gradient2(
+    low = "dodgerblue", high = "darkorange",
+    midpoint = 0, limit = c(-1, 1)
+  ) +
+  guides(fill = F) +
+  theme_few(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    plot.margin = unit(c(9, 1, 0, 0), "mm")
+  )
+cormat.all.tasks
+ggsave(cormat.all.tasks, filename="graphics/cormat_all_tasks_reduced.png", width=25, height=25, scale=0.8)
+
+```
+
+```{r}
+library(corrplot)
+
+
+png(file = "graphics/cor_mat.png", width = 30, height=15, units="cm", res=700)
+corrplot(corr[13:16,],method="color",   p.mat = p.mat[13:16,], sig.level = c(0.001, 0.01, 0.05), pch.cex = 0.9, insig = 'label_sig', pch.col = 'grey20', tl.col = 'black')
+
+dev.off()
+
+library(ggstatsplot)
+cormat2<-ggcorrmat(
+  data=cor.data,
+  p.adjust.method = "none",
+  )
+
+ggsave(cormat2, filename="graphics/cormat_all_tasks_reduced2.png", width=25, height=25, scale=0.8)
+```
+
+## Plotting
+
+```{r}
+source("https://gist.githubusercontent.com/benmarwick/2a1bb0133ff568cbe28d/raw/fb53bd97121f7f9ce947837ef1a4c65a73bffb3f/geom_flat_violin.R")
+       
+raincloud_theme = theme(
+text = element_text(size = 10),
+axis.title.x = element_text(size = 16),
+axis.title.y = element_text(size = 16),
+axis.text = element_text(size = 14),
+axis.text.x = element_text(angle = 45, vjust = 0.5),
+legend.title=element_text(size=16),
+legend.text=element_text(size=16),
+legend.position = "right",
+plot.title = element_text(lineheight=.8, face="bold", size = 16),
+panel.border = element_blank(),
+panel.grid.minor = element_blank(),
+panel.grid.major = element_blank(),
+axis.line.x = element_line(colour = 'black', size=0.5, linetype='solid'),
+axis.line.y = element_line(colour = 'black', size=0.5, linetype='solid'))
+```
+
+#### Distance travelled
+```{r}
+
+hc.data<-hc.data%>%
+    mutate(condition2=fct_recode(as.factor(condition), "O+ / S+"="bp", "O- / S+"="sp", "O+ / S-"="op", "O- / S-"="np"))%>%
+  mutate(condition2=fct_relevel(condition2, "O+ / S+", "O+ / S-","O- / S+",  "O- / S-"))
+
+levels(hc.data$condition2)
+distance.plot2 <- ggplot(data = hc.data, aes(y = distance.sum, x = condition2, fill = condition2)) +
+geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8) +
+geom_point(aes(y = distance.sum, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
+geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) +
+expand_limits(x = 5.25) +
+guides(fill = FALSE) +
+guides(color = FALSE) +
+#scale_color_brewer(palette = "Spectral") +
+#scale_fill_brewer(palette = "Spectral") +
+#coord_flip() +
+scale_colour_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+scale_fill_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+
+  theme_bw() +
+raincloud_theme+
+xlab("") + 
+ylab("Distance travelled (in m)")
+
+distance.plot2 
+```
+
+
+
+#### Tail wagging
+```{r}
+tail.tip.data<-tail.tip.data%>%
+    mutate(condition2=fct_recode(as.factor(condition), "O+ / S+"="bp", "O- / S+"="sp", "O+ / S-"="op", "O- / S-"="np"))%>%
+  mutate(condition2=fct_relevel(condition2, "O+ / S+", "O+ / S-","O- / S+",  "O- / S-"))
+
+tail.plot2 <- ggplot(data = tail.tip.data, aes(y = tail_tip_scaled, x = condition2, fill = condition2)) +
+geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8) +
+geom_point(aes(y = tail_tip_scaled, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
+geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) +
+expand_limits(x = 5.25) +
+guides(fill = FALSE) +
+guides(color = FALSE) +
+#scale_color_brewer(palette = "Spectral") +
+#scale_fill_brewer(palette = "Spectral") +
+#coord_flip() +
+scale_colour_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+scale_fill_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+
+  theme_bw() +
+raincloud_theme+
+xlab("") + 
+ylab("Tail wagging ratio")+
+  ylim(0,1)
+
+tail.plot2 
+```
+
+#### Area plot
+
+```{r}
+
+hc.data<-hc.data%>%
+    mutate(condition2=fct_recode(as.factor(condition), "O+ / S+"="bp", "O- / S+"="sp", "O+ / S-"="op", "O- / S-"="np"))%>%
+  mutate(condition2=fct_relevel(condition2, "O+ / S+", "O+ / S-","O- / S+",  "O- / S-"))
+
+levels(hc.data$condition2)
+area.plot2 <- ggplot(data = hc.data, aes(y = area_covered, x = condition2, fill = condition2)) +
+geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8) +
+geom_point(aes(y = area_covered, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
+geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) +
+expand_limits(x = 5.25) +
+guides(fill = FALSE) +
+guides(color = FALSE) +
+#scale_color_brewer(palette = "Spectral") +
+#scale_fill_brewer(palette = "Spectral") +
+#coord_flip() +
+scale_colour_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+scale_fill_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+
+  theme_bw() +
+raincloud_theme+
+xlab("") + 
+ylab("Proportion of visited area")+
+  ylim(0,1)
+
+area.plot2 
+```
+#### Minimal distance to objects
+```{r}
+
+hc.data<-hc.data%>%
+    mutate(condition2=fct_recode(as.factor(condition), "O+ / S+"="bp", "O- / S+"="sp", "O+ / S-"="op", "O- / S-"="np"))%>%
+  mutate(condition2=fct_relevel(condition2, "O+ / S+", "O+ / S-","O- / S+",  "O- / S-"))
+
+levels(hc.data$condition2)
+object.distance.plot2 <- ggplot(data = hc.data, aes(y = average.min.object.distance, x = condition2, fill = condition2)) +
+geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8) +
+geom_point(aes(y = average.min.object.distance, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
+geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) +
+expand_limits(x = 5.25) +
+guides(fill = FALSE) +
+guides(color = FALSE) +
+#scale_color_brewer(palette = "Spectral") +
+#scale_fill_brewer(palette = "Spectral") +
+#coord_flip() +
+scale_colour_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+scale_fill_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+
+  theme_bw() +
+raincloud_theme+
+xlab("") + 
+ylab("Avg. min. distance to objects")+
+  ylim(0,2.3)
+
+object.distance.plot2 
+```
+
+
+
+
+#### Visual angle
+```{r}
+
+hc.data<-hc.data%>%
+    mutate(condition2=fct_recode(as.factor(condition), "O+ / S+"="bp", "O- / S+"="sp", "O+ / S-"="op", "O- / S-"="np"))%>%
+  mutate(condition2=fct_relevel(condition2, "O+ / S+", "O+ / S-","O- / S+",  "O- / S-"))
+
+levels(hc.data$condition2)
+vis.angle.owner.plot2 <- ggplot(data = hc.data, aes(y = mean_vis_angle_owner_scaled, x = condition2, fill = condition2)) +
+geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8) +
+geom_point(aes(y = mean_vis_angle_owner_scaled, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
+geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) +
+expand_limits(x = 5.25) +
+guides(fill = FALSE) +
+guides(color = FALSE) +
+#scale_color_brewer(palette = "Spectral") +
+#scale_fill_brewer(palette = "Spectral") +
+#coord_flip() +
+scale_colour_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+scale_fill_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+
+  theme_bw() +
+raincloud_theme+
+xlab("") + 
+ylab("Vis. angle to owner chair (scaled)")+
+  ylim(0,0.8)
+
+vis.angle.owner.plot2 
+```
+#### Proportion duration owner
+```{r}
+
+hc.data<-hc.data%>%
+    mutate(condition2=fct_recode(as.factor(condition), "O+ / S+"="bp", "O- / S+"="sp", "O+ / S-"="op", "O- / S-"="np"))%>%
+  mutate(condition2=fct_relevel(condition2, "O+ / S+", "O+ / S-","O- / S+",  "O- / S-"))
+
+levels(hc.data$condition2)
+owner.duration.plot <- ggplot(data = hc.data, aes(y = prop_duration_owner, x = condition2, fill = condition2)) +
+geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8) +
+geom_point(aes(y = prop_duration_owner, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
+geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) +
+expand_limits(x = 5.25) +
+guides(fill = FALSE) +
+guides(color = FALSE) +
+#scale_color_brewer(palette = "Spectral") +
+#scale_fill_brewer(palette = "Spectral") +
+#coord_flip() +
+scale_colour_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+scale_fill_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+
+  theme_bw() +
+raincloud_theme+
+xlab("") + 
+ylab("Prop. time in owner IA")+
+  ylim(0,1)
+
+owner.duration.plot 
+```
+#### Proportion duration stranger
+```{r}
+
+hc.data<-hc.data%>%
+    mutate(condition2=fct_recode(as.factor(condition), "O+ / S+"="bp", "O- / S+"="sp", "O+ / S-"="op", "O- / S-"="np"))%>%
+  mutate(condition2=fct_relevel(condition2, "O+ / S+", "O+ / S-","O- / S+",  "O- / S-"))
+
+levels(hc.data$condition2)
+stranger.duration.plot <- ggplot(data = hc.data, aes(y = prop_duration_stranger, x = condition2, fill = condition2)) +
+geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8) +
+geom_point(aes(y = prop_duration_stranger, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
+geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) +
+expand_limits(x = 5.25) +
+guides(fill = FALSE) +
+guides(color = FALSE) +
+#scale_color_brewer(palette = "Spectral") +
+#scale_fill_brewer(palette = "Spectral") +
+#coord_flip() +
+scale_colour_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+scale_fill_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+
+  theme_bw() +
+raincloud_theme+
+xlab("") + 
+ylab("Prop. time in stranger IA")+
+  ylim(0,1)
+
+stranger.duration.plot 
+```
+
+#### Proportion duration door
+```{r}
+
+hc.data<-hc.data%>%
+    mutate(condition2=fct_recode(as.factor(condition), "O+ / S+"="bp", "O- / S+"="sp", "O+ / S-"="op", "O- / S-"="np"))%>%
+  mutate(condition2=fct_relevel(condition2, "O+ / S+", "O+ / S-","O- / S+",  "O- / S-"))
+
+levels(hc.data$condition2)
+door.duration.plot <- ggplot(data = hc.data, aes(y = prop_duration_door, x = condition2, fill = condition2)) +
+geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8) +
+geom_point(aes(y = prop_duration_door, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
+geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) +
+expand_limits(x = 5.25) +
+guides(fill = FALSE) +
+guides(color = FALSE) +
+#scale_color_brewer(palette = "Spectral") +
+#scale_fill_brewer(palette = "Spectral") +
+#coord_flip() +
+scale_colour_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+scale_fill_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+
+  theme_bw() +
+raincloud_theme+
+xlab("") + 
+ylab("Prop. time in door IA")+
+  ylim(0,1)
+
+door.duration.plot 
+```
+
+
+
+
+
+
+```{r}
+library(cowplot)
+pg2<-plot_grid(distance.plot2, object.distance.plot2, area.plot2, tail.plot2, ncol=2,  labels=c("A", "B", "C", "D"))
+
+ggsave(pg2, filename = "graphics/dog_exploration_pg3.png", width=12, height=12, scale=0.85)
+```
+
+```{r}
+
+library(cowplot)
+pg3<-plot_grid(owner.duration.plot , stranger.duration.plot , door.duration.plot , nrow=3,  labels=c("B", "C", "D"), label_size = 20)
+
+#execute script in 01_dog_tracking_data_processing
+pg4<-plot_grid(p3, pg3, ncol=2,  labels=c("A", ""), rel_widths =c(1, 0.35), label_size = 20 )
+
+ggsave(pg4, filename = "graphics/dog_exploration_duration_pg4.png", width=13, height=9, scale=1.4)
+```
+
+
+### correlations between distances across keypoints
+
+```{r}
+
+distance.cor.data<-xdata%>%
+  select(subject, condition, keypoint, distance.sum)%>%
+  pivot_wider(names_from = keypoint, values_from=distance.sum)%>%
+  select(-subject, -condition)%>%
+  rename("Tail base"=tail_base, "Head centre"=head_centre,"Right ear"=right_ear,"Left ear"=left_ear,"Snout"=snout,"Tail tip"=tail_tip,"Hips"=hips,"Atlas"=atlas )
+
+
+
+
+library(ggcorrplot)
+corr <- cor(distance.cor.data, use = "pairwise.complete.obs")
+p.mat <- cor_pmat(distance.cor.data, use = "pairwise.complete.obs")
+cormat.all.tasks<- ggcorrplot(corr, hc.order = FALSE,
+  sig.level = 0.001,
+  type = "lower",
+  p.mat = p.mat,
+  insig = c("pch"), pch = 4, pch.col = "black",
+  pch.cex = 5,
+  lab = TRUE,
+  digits = 2
+) +
+  scale_fill_gradient2(
+    low = "dodgerblue", high = "darkorange",
+    midpoint = 0, limit = c(-1, 1)
+  ) +
+  guides(fill = F) +
+  theme_few(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    plot.margin = unit(c(9, 1, 0, 0), "mm")
+  )
+cormat.all.tasks
+
+ggsave(cormat.all.tasks, filename = "graphics/distance_corplot.png", width=6, height=6, scale=0.9)
+
+```
+
+
+```{r}
+library(cowplot)
+#execute script in 01_dog_tracking_data_processing
+pg5<-plot_grid(hs_plot2, cormat.all.tasks, labels = c("B", "C"), rel_widths = c(1,1.3))
+pg6<-plot_grid(p.example, pg5, labels = c("A", ""), nrow=2, rel_heights = c(1,1.3))
+
+ggsave(pg6, filename = "graphics/validation_pg.png", width=10, height=10, scale=0.8)
+```
+
+
+
+
+
