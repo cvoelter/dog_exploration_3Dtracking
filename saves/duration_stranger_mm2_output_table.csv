@@ -1,0 +1,6 @@
+,Estimate,SE,z value,p
+(Intercept),-3.6,0.27,-13.19,0
+owner_presencep,0.01,0.27,0.05,0.957
+stranger_presencep,1.41,0.28,5.07,0
+z.trial,-0.39,0.08,-4.75,0
+sexM,-0.47,0.25,-1.92,0.055
