@@ -1,0 +1,395 @@
+---
+title: 'Dog exploration: manual scorings'
+author: "Christoph Völter"
+date: "2022-09-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(lme4)
+library(summarytools)
+library(glmmTMB)
+library(car)
+
+source("./functions/diagnostic_fcns.r")
+source("./functions/glmm_stability.r")
+source("./functions/boot_glmm2.r")
+source("./functions/boot_glmmTMB.r")
+source("./functions/glmmTMB_stability.r")
+source("./functions/drop1_para_glmmtmb.r")
+source("./functions/extract_ranef_gmmTMB.r")
+load("3d_tracking_manual_scoring_workspace.RData")
+```
+
+
+Load data
+```{r}
+xdata <- read.csv(file = "data/dog_exploration_3Dtracking_scoringdata.csv")%>%
+    separate(Scoring,  into=c(NA,NA,NA,"subject","condition"), sep = "_") #add info from filenames
+
+view(dfSummary(xdata))
+table(xdata$subject, xdata$condition)
+
+```
+
+```{r}
+demographics.data<-read.csv(file="data/dog_tracking_project_data.csv")%>%
+  mutate(subject=tolower(dog_name))%>%
+  mutate(subject=fct_recode(subject, mira="mira3"))%>%
+  mutate(condition=ifelse(condition_id=="pp","bp",ifelse(condition_id=="pa", "op", ifelse(condition_id=="ap", "sp", ifelse(condition_id=="aa", "np",NA)))))
+
+xx=data.frame(expand.grid(Value=levels(as.factor(xdata$Value)), trial=levels(as.factor(xdata$condition)), Subject=levels(as.factor(xdata$subject))))
+```
+
+aggregating data per trial
+
+```{r}
+agg.data<-xdata %>%
+  group_by(subject, condition, Behaviour, Value)%>%
+  summarise(sum_duration=sum(duration))%>%
+  ungroup()%>%
+  droplevels()%>%
+  complete(subject, condition, Value, fill=list(sum.duration=0))%>% #fill in 0s
+  inner_join(demographics.data)%>%
+  replace_na(list(sum_duration=0))
+view(dfSummary(agg.data))
+
+hist(agg.data$sum_duration[agg.data$Value=="trial"])
+trial.data<-agg.data %>%
+  filter(Value=="trial")
+view(dfSummary(trial.data))
+
+agg.data.wide <- agg.data %>%
+  select(subject, condition, Value, sum_duration, dog_ID)%>%
+  pivot_wider(names_from = Value, values_from = sum_duration)%>%
+  mutate(caregiver = caregiver / trial, door_left = door_left / trial, door_right = door_right / trial, objects = objects / trial, stranger = stranger / trial )
+
+write.csv(agg.data.wide, file = "data/dog_exploration_3Dtracking_agg_scoringdata.csv")
+```
+
+
+
+
+## Duration in owner proximity
+
+```{r}
+model.data <- agg.data.wide %>%
+  inner_join(demographics.data)%>%
+    mutate(test_date=as.Date(test_date, tryFormats = c("%d.%m.%Y")), date_of_birth=as.Date(date_of_birth, tryFormats = c("%d.%m.%Y")), age=test_date-date_of_birth)
+
+model.data$stranger_presence<-as.factor(model.data$stranger_presence)
+model.data$owner_presence<-as.factor(model.data$owner_presence)
+model.data$z.trial<-as.vector(scale(model.data$trial_number, center = TRUE, scale=TRUE))
+model.data$z.age<-as.vector(scale(model.data$age, center = TRUE, scale=TRUE))
+hist(model.data$z.trial)
+
+hist(model.data$caregiver)
+min(model.data$caregiver)
+max(model.data$caregiver)
+view(dfSummary(model.data))
+```
+
+
+
+```{r}
+p1<-ggplot(data=model.data, aes(x=condition, y=caregiver))+
+  geom_jitter()+
+  geom_violin(alpha=0.2)
+p1
+```
+
+
+
+
+```{r}
+## code to run the model
+
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+
+model.data$caregiver.scaled <- (model.data$caregiver*(length(model.data$caregiver) - 1) + 0.5)/length(model.data$caregiver) 
+
+
+mm1_duration_owner=glmmTMB(caregiver.scaled ~owner_presence*stranger_presence+z.trial+z.age+sex+
+            (1|subject),
+             data=model.data, family=beta_family, control=contr)
+
+mm1_duration_owner_null=glmmTMB(caregiver.scaled ~z.trial+z.age+sex+
+            (1|subject),
+             data=model.data, family=beta_family, control=contr)
+
+anova(mm1_duration_owner, mm1_duration_owner_null, test="Chisq")
+summary(mm1_duration_owner)
+```
+
+
+```{r}
+overdisp.test(mm1_duration_owner)
+
+summary(mm1_duration_owner)
+
+drop1(mm1_duration_owner, test="Chisq")
+```
+
+
+```{r}
+library(car)
+xx=lm(caregiver.scaled~owner_presence+stranger_presence+z.trial+z.age+sex, data=model.data)
+vif(xx)
+```
+```{r}
+
+mm2_duration_owner=glmmTMB(caregiver.scaled ~owner_presence+stranger_presence+ z.trial+z.age+sex+
+            (1|subject),
+              data=model.data, family=beta_family, control=contr)#pruned due non-convergence
+
+mm2_duration_owner_null=glmmTMB(caregiver.scaled~z.trial+z.age+sex+
+            (1|subject),
+              data=model.data, family=beta_family, control=contr)#pruned due non-convergence
+
+anova(mm2_duration_owner, mm2_duration_owner_null, test="Chisq")
+summary(mm2_duration_owner)
+```
+
+
+```{r}
+mm2_duration_owner.drop1<-drop1(mm2_duration_owner, test="Chisq",  control=contr)
+```
+
+```{r}
+mm2_duration_owner.ci=boot.glmmTMB(mm2_duration_owner,model.data, nboots=1000, para=T, n.cores = "all-1", )
+
+```
+### output table
+```{r}
+model_duration_owner <- bind_cols(as.data.frame(summary(mm2_duration_owner)$coefficients$cond),
+                             mm2_duration_owner.drop1,                             mm2_duration_owner.ci$ci.estimates$fe[1:6,]) %>%
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
+  mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
+  mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
+#  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+mutate(p=replace(p, p==0, "<0.001"))
+
+
+
+write.csv(model_duration_owner, file = "saves/duration_owner_mm2_manual_scorings_output_table.csv")
+```
+
+
+
+
+## Duration in stranger proximity
+
+```{r}
+model.data$stranger_presence<-as.factor(model.data$stranger_presence)
+model.data$owner_presence<-as.factor(model.data$owner_presence)
+model.data$z.trial<-scale(model.data$trial_number, center = TRUE, scale=TRUE)
+
+hist(model.data$z.trial)
+
+hist(model.data$stranger)
+min(model.data$stranger)
+max(model.data$stranger)
+view(dfSummary(model.data))
+```
+
+
+
+```{r}
+p1<-ggplot(data=model.data, aes(x=condition, y=stranger))+
+  geom_jitter()+
+  geom_violin(alpha=0.2)
+p1
+```
+
+
+
+
+```{r}
+## code to run the model
+
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+
+model.data$stranger.scaled <- (model.data$stranger*(length(model.data$stranger) - 1) + 0.5)/length(model.data$stranger) 
+
+
+mm1_duration_stranger=glmmTMB(stranger.scaled~owner_presence*stranger_presence+z.trial+z.age+sex+
+            (1|subject)+(0+owner_presence|subject)+(0+z.trial|subject),
+             data=model.data, family=beta_family, control=contr)#pruned due non-convergence
+
+mm1_duration_stranger_null=glmmTMB(stranger.scaled~z.trial+z.age+sex+
+            (1|subject)+(0+owner_presence|subject)+(0+z.trial|subject),
+             data=model.data, family=beta_family, control=contr)
+
+anova(mm1_duration_stranger, mm1_duration_stranger_null, test="Chisq")
+summary(mm1_duration_stranger)
+```
+
+
+```{r}
+overdisp.test(mm1_duration_stranger)
+
+summary(mm1_duration_stranger)
+
+drop1(mm1_duration_stranger, test="Chisq")
+```
+
+
+```{r}
+library(car)
+xx=lm(stranger.scaled~owner_presence+stranger_presence+z.trial+z.age+sex, data=model.data)
+vif(xx)
+```
+```{r}
+
+mm2_duration_stranger=glmmTMB(stranger.scaled ~owner_presence+stranger_presence+ z.trial+z.age+ sex+
+           (1|subject)+(0+z.trial|subject),
+             data=model.data, family=beta_family, control=contr)#pruned due non-convergence
+
+mm2_duration_stranger_null=glmmTMB(stranger.scaled ~ z.trial+z.age+ sex+
+           (1|subject)+(0+z.trial|subject),
+             data=model.data, family=beta_family, control=contr)#pruned due non-convergence
+anova(mm2_duration_stranger, mm2_duration_stranger_null, test="Chisq")
+summary(mm2_duration_stranger)
+```
+
+
+```{r}
+mm2_duration_stranger.drop1<-drop1(mm2_duration_stranger, test="Chisq",  control=contr)
+```
+```{r}
+mm2_duration_stranger.ci=boot.glmmTMB(mm2_duration_stranger,model.data, nboots=1000, para=T, n.cores = "all-1", )
+
+```
+
+
+### output table
+
+```{r}
+
+
+model_duration_stranger <- bind_cols(as.data.frame(summary(mm2_duration_stranger)$coefficients$cond),
+                             mm2_duration_stranger.drop1,                             
+                             mm2_duration_stranger.ci$ci.estimates$fe[1:6,]) %>%
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
+  mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
+  mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
+#  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+mutate(p=replace(p, p==0, "<0.001"))
+
+
+write.csv(model_duration_stranger, file = "saves/duration_stranger_mm2_manual_scorings_output_table.csv")
+```
+
+
+## Duration in door proximity
+
+```{r}
+model.data <- model.data %>%
+  mutate(door = door_left + door_right)
+model.data$stranger_presence<-as.factor(model.data$stranger_presence)
+model.data$owner_presence<-as.factor(model.data$owner_presence)
+model.data$z.trial<-scale(model.data$trial_number, center = TRUE, scale=TRUE)
+
+hist(model.data$z.trial)
+
+hist(model.data$door)
+min(model.data$door)
+max(model.data$door)
+view(dfSummary(model.data))
+```
+
+
+
+```{r}
+p1<-ggplot(data=model.data, aes(x=condition, y=door))+
+  geom_jitter()+
+  geom_violin(alpha=0.2)
+p1
+```
+
+
+
+
+```{r}
+## code to run the model
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+
+model.data$door.scaled <- (model.data$door*(length(model.data$door) - 1) + 0.5)/length(model.data$door) 
+min(model.data$door.scaled)
+
+mm1_duration_door=glmmTMB(door.scaled~owner_presence*stranger_presence+z.trial+z.age + sex+
+           (1|subject)+(0+z.trial|subject),
+             data=model.data, family=beta_family, control=contr)
+
+mm1_duration_door_null=glmmTMB(door.scaled~ z.trial+z.age + sex+
+           (1|subject)+(0+z.trial|subject),
+             data=model.data, family=beta_family, control=contr)
+
+anova(mm1_duration_door, mm1_duration_door_null, test="Chisq")
+summary(mm1_duration_door)
+```
+
+
+```{r}
+overdisp.test(mm1_duration_door)
+
+summary(mm1_duration_door)
+
+drop1(mm1_duration_door, test="Chisq")
+```
+
+
+```{r}
+library(car)
+xx=lm(door.scaled~owner_presence+stranger_presence+z.trial+z.age+sex, data=model.data)
+vif(xx)
+```
+
+```{r}
+
+mm2_duration_door=glmmTMB(door.scaled ~owner_presence+stranger_presence+z.trial+z.age + sex+
+            (1|subject)+(0+z.trial|subject),
+             data=model.data, family=beta_family, control=contr)
+
+mm2_duration_door_null=glmmTMB(door.scaled ~ z.trial+z.age + sex+
+            (1|subject)+(0+z.trial|subject),
+             data=model.data, family=beta_family, control=contr)
+anova(mm2_duration_door, mm2_duration_door_null, test="Chisq")
+summary(mm2_duration_door)
+```
+
+
+```{r}
+mm2_duration_door.drop1<-drop1(mm2_duration_door, test="Chisq",  control=contr)
+```
+
+```{r}
+
+mm2_duration_door.ci=boot.glmmTMB(mm2_duration_door,model.data, nboots=1000, para=T, n.cores = "all-1", excl.non.conv=T, contr=contr)#results in error message
+
+```
+### output table
+
+```{r}
+
+
+model_duration_door <- bind_cols(as.data.frame(summary(mm2_duration_door)$coefficients$cond),
+                             mm2_duration_door.drop1,
+                              mm2_duration_door.ci$ci.estimates$fe[1:6,]) %>%
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
+  mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
+  mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
+#  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+  mutate(p=replace(p, p==0, "<0.001"))
+
+write.csv(model_duration_door, file = "saves/duration_door_mm2_manual_scorings_output_table.csv")
+```
+
+```{r}
+save.image("3d_tracking_manual_scoring_workspace.RData")
+```
+
+
