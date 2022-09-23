@@ -16,14 +16,17 @@ library(glmmTMB)
 source("./functions/diagnostic_fcns.r")
 source("./functions/glmm_stability.r")
 source("./functions/boot_glmm2.r")
+source("./functions/boot_glmmTMB.r")
 source("./functions/glmmTMB_stability.r")
 source("./functions/drop1_para_glmmtmb.r")
 source("./functions/extract_ranef_gmmTMB.r")
+
+load("dog_exploration_workspace.RData")
 ```
 
 Notes: Pruning of the models in case of convergence issues in the following order:
 - remove random slope of control variable trial number
-- remove control predictors:  sex, age
+- remove control predictors:  sex, age, trial
 - remove random slopes of test predictors
 
 
@@ -103,11 +106,11 @@ hist(hc.data$z.trial)
 ```{r}
 mm1<-lmer(log(distance.sum)~owner_presence:stranger_presence+owner_presence+
             stranger_presence+z.trial+sex+z.age+
-            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
 
 
 mm1.null<-lmer(log(distance.sum)~z.trial+sex+z.age+
-            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
 
 anova(mm1, mm1.null,  test = "Chisq")
 ```
@@ -129,11 +132,11 @@ hc.data$log.distance.sum<-log(hc.data$distance.sum)
 
 mm2<-lmer(log.distance.sum~owner_presence+stranger_presence+
             z.trial+sex+z.age+
-            (1+owner_presence+stranger_presence|subject), data=hc.data, weights=1/prop_tracked_data, REML=FALSE)
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject), data=hc.data, weights=1/prop_tracked_data, REML=FALSE)
 
 
 mm2.null<-lmer(log.distance.sum~z.trial+sex+z.age+
-            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
 
 anova(mm2, mm2.null,  test = "Chisq")
 ```
@@ -157,7 +160,7 @@ ranef.diagn.plot(mm2)
 
 ```{r}
 library(car)
-xx=lm(log(distance.sum)~owner_presence+stranger_presence+cBARQ_separation_problems+z.cBARQ_nonsocial_fear+z.trial+z.age+sex, data=hc.data)
+xx=lm(log(distance.sum)~owner_presence+stranger_presence+z.trial+z.age+sex, data=hc.data)
 vif(xx)
 ```
 relative model complexity
@@ -201,7 +204,7 @@ model_table_distance <- bind_cols(as.data.frame(summary(mm2)$coefficients),
   select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = npar, p = `Pr(Chi)`) %>%
   mutate(across(.cols = c(p), ~ round(.x, 3))) %>% 
   mutate(across(.cols = c(Estimate:Chi2), ~ round(.x, 2))) %>% 
-  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+  #mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
 mutate(p=replace(p, p==0, "<0.001"))
 
 write.csv(model_table_distance , file = "saves/distance_mm2_output_table.csv")
@@ -221,7 +224,7 @@ prop.tracked.data<-xdata%>%
 
 tail.tip.data<-xdata%>%
   filter(keypoint=="tail_base" | keypoint=="tail_tip")%>%
-  select(subject, keypoint, distance.sum, owner_presence, stranger_presence, condition, trial_number, sex, age, cBARQ_sep_attach )%>%
+  select(subject, keypoint, distance.sum, owner_presence, stranger_presence, condition, trial_number, sex, age, cBARQ_sep_attach, tail_angle_mean, tail_angle_median, tail_angle_prop_tracked  )%>%
   pivot_wider(names_from = keypoint, values_from=distance.sum)%>%
   mutate(tail_tip_diff=tail_tip-tail_base, tail_tip_ratio=tail_tip/tail_base, tail_tip_scaled=tail_tip_ratio/max(tail_tip_ratio))%>%
   left_join(prop.tracked.data)
@@ -239,7 +242,7 @@ tail.tip.data$stranger_presence<-as.factor(tail.tip.data$stranger_presence)
 tail.tip.data$owner_presence<-as.factor(tail.tip.data$owner_presence)
 tail.tip.data$z.trial<-scale(tail.tip.data$trial_number, center = TRUE, scale=TRUE)
 tail.tip.data$z.age<-scale(tail.tip.data$age, center = TRUE, scale=TRUE)
-tail.tip.data$z.cBARQ_sep_attach<-scale(tail.tip.data$cBARQ_sep_attach, center = TRUE, scale=TRUE)
+
 
 ##code to remove 1 and 0 from the distribution of the response variable
 tail.tip.data$resp <- (tail.tip.data$tail_tip_scaled*(length(tail.tip.data$tail_tip_scaled) - 1) + 0.5)/length(tail.tip.data$tail_tip_scaled) 
@@ -317,7 +320,7 @@ summary(mm3.3)
 
 
 ```{r}
-mm3_tail.ci=boot.glmmtmb(mm3,tail.tip.data, nboots=1000, para=T, n.cores = "all-1", )
+mm3_tail.ci=boot.glmmTMB(mm3,tail.tip.data, nboots=1000, para=T, n.cores = "all-1", )
 
 ```
 
@@ -332,7 +335,7 @@ model_table_tail<- bind_cols(as.data.frame(summary(mm3)$coefficients$cond),
   select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
   mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
   mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
-  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+#  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
 mutate(p=replace(p, p==0, "<0.001"))
 
 write.csv(model_table_tail, file = "saves/tail_mm3_output_table.csv")
@@ -356,12 +359,7 @@ hc.data$stranger_presence<-as.factor(hc.data$stranger_presence)
 hc.data$owner_presence<-as.factor(hc.data$owner_presence)
 hc.data$z.trial<-scale(hc.data$trial_number, center = TRUE, scale=TRUE)
 hc.data$z.age<-scale(hc.data$age, center = TRUE, scale=TRUE)
-hc.data$z.cBARQ_separation_problems<-scale(hc.data$cBARQ_separation_problems, center = TRUE, scale=TRUE)
-hc.data$z.cBARQ_sep_attach<-scale(hc.data$cBARQ_sep_attach, center = TRUE, scale=TRUE)
-hc.data$z.cBARQ_nonsocial_fear<-scale(hc.data$cBARQ_nonsocial_fear, center = TRUE, scale=TRUE)
 
-hist(hc.data$cBARQ_nonsocial_fear)
-hist(hc.data$cBARQ_sep_attach)
 hist(hc.data$distance.sum)
 hist(hc.data$z.trial)
 
@@ -390,13 +388,15 @@ contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
 
 mm1_area=glmmTMB(area_covered~owner_presence*stranger_presence+
             z.trial+z.age+sex+
-            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject),
+            (1+owner_presence+stranger_presence|subject)+
+           (0+z.trial|subject),
              weights=prop_tracked_data_inv,
              data=hc.data, family=beta_family, control=contr)
 
 mm1_area_null=glmmTMB(area_covered~1+
             z.trial+z.age+sex+
-            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject),
+            (1+owner_presence+stranger_presence|subject)+
+           (0+z.trial|subject),
              weights=prop_tracked_data_inv,
              data=hc.data, family=beta_family, control=contr)
 
@@ -410,12 +410,12 @@ overdisp.test(mm1_area)
 
 summary(mm1_area)
 
-drop1(mm1_area, test="Chisq")#convergence problems
+drop1(mm1_area, test="Chisq")
 ```
 
 ```{r}
 library(car)
-xx=lm(area_covered~owner_presence+stranger_presence+z.trial+z.age+sex + z.cBARQ_sep_attach, data=hc.data)
+xx=lm(area_covered~owner_presence+stranger_presence+z.trial+z.age+sex, data=hc.data)
 vif(xx)
 ```
 
@@ -426,14 +426,15 @@ Drop interaction
 hc.data$prop_tracked_data_inv<-1/hc.data$prop_tracked_data
 contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
 
-mm2_area=glmmTMB(area_covered~owner_presence+stranger_presence+            z.trial+z.age+sex+
-            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject),
-           #(0+z.trial|subject), #pruned due to convergence issues
+mm2_area=glmmTMB(area_covered~owner_presence+stranger_presence+   z.trial+z.age+sex+
+            (1+owner_presence+stranger_presence|subject)+
+           (0+z.trial|subject), 
              weights=prop_tracked_data_inv,
              data=hc.data, family=beta_family, control=contr)
 
 mm2_area_null=glmmTMB(area_covered~z.trial+z.age+sex+
-            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject),
+            (1+owner_presence+stranger_presence|subject)+
+           (0+z.trial|subject),
              weights=prop_tracked_data_inv,
              data=hc.data, family=beta_family, control=contr)
 
@@ -448,7 +449,11 @@ summary(mm2_area)
 
 
 ```{r}
-drop1(mm2_area, test="Chisq",  control=contr)#convergence problems
+mm2_area.drop1<-drop1(mm2_area, test="Chisq",  control=contr)
+```
+```{r}
+mm2_area.ci=boot.glmmTMB(mm2_area, hc.data, nboots=1000, para=T, n.cores = "all-1", )
+
 ```
 
 ### output table
@@ -456,11 +461,13 @@ drop1(mm2_area, test="Chisq",  control=contr)#convergence problems
 ```{r}
 
 
-model_table_area <- bind_cols(as.data.frame(summary(mm2_area)$coefficients$cond)) %>% 
-  select(Estimate, SE = `Std. Error`, `z value`, p = `Pr(>|z|)`) %>%
+model_table_area <- bind_cols(as.data.frame(summary(mm2_area)$coefficients$cond), 
+                             mm2_area.drop1,
+                             mm2_area.ci$ci.estimates$fe[1:6,]) %>%
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
   mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
-  mutate(across(.cols = c(Estimate:`z value`), ~ format(round(.x, 2), nsmall=2))) %>% 
-  #mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+  mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
+#  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
 mutate(p=replace(p, p==0, "<0.001"))
 
 write.csv(model_table_area, file = "saves/area_mm2_output_table.csv")
@@ -497,11 +504,11 @@ hc.data$log.average.min.object.distance=log(hc.data$average.min.object.distance)
 
 mm1_obj_dist_lmer<-lmer(log.average.min.object.distance~owner_presence*stranger_presence
             +z.trial+z.age+sex+
-            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
 
 
 mm1_obj_dist_lmer_null<-lmer(log.average.min.object.distance~z.trial+z.age+sex+
-            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
 
 anova(mm1_obj_dist_lmer, mm1_obj_dist_lmer_null,  test = "Chisq")
 ```
@@ -519,15 +526,13 @@ drop1_mm1_obj_distance_lmer
 ```
 Model refitted without the interaction term
 ```{r}
-
-
 mm2_obj_dist_lmer<-lmer(log.average.min.object.distance~owner_presence+stranger_presence
             +z.trial+z.age+sex+
-            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
 
 
 mm2_obj_dist_lmer_null<-lmer(log.average.min.object.distance~z.trial+z.age+sex+
-            (1+owner_presence+stranger_presence|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject), weights=1/prop_tracked_data, data=hc.data, REML=FALSE)
 
 anova(mm2_obj_dist_lmer, mm2_obj_dist_lmer_null,  test = "Chisq")
 ```
@@ -585,7 +590,7 @@ model_table_min_obj_distance <- bind_cols(as.data.frame(summary(mm2_obj_dist_lme
   select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = npar, p = `Pr(Chi)`) %>%
   mutate(across(.cols = c(p), ~ round(.x, 3))) %>% 
   mutate(across(.cols = c(Estimate:Chi2), ~ round(.x, 2))) %>% 
-  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+  #mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
 mutate(p=replace(p, p==0, "<0.001"))
 
 write.csv(model_table_min_obj_distance , file = "saves/minimal_obj_distance_mm2_output_table.csv")
@@ -601,9 +606,7 @@ hc.data$stranger_presence<-as.factor(hc.data$stranger_presence)
 hc.data$owner_presence<-as.factor(hc.data$owner_presence)
 hc.data$z.trial<-scale(hc.data$trial_number, center = TRUE, scale=TRUE)
 hc.data$z.age<-scale(hc.data$age, center = TRUE, scale=TRUE)
-hc.data$z.cBARQ_separation_problems<-scale(hc.data$cBARQ_separation_problems, center = TRUE, scale=TRUE)
-hc.data$z.cBARQ_sep_attach<-scale(hc.data$cBARQ_sep_attach, center = TRUE, scale=TRUE)
-hc.data$z.cBARQ_nonsocial_fear<-scale(hc.data$cBARQ_nonsocial_fear, center = TRUE, scale=TRUE)
+
 
 
 hist(hc.data$prop_look_owner_chair)
@@ -640,23 +643,68 @@ hc.data$prop_tracked_data_inv<-1/hc.data$prop_tracked_data
 contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
 
 mm1_owner_vis_angle=glmmTMB(mean_vis_angle_owner_scaled~owner_presence*stranger_presence+
-            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject), 
+                              z.trial+z.age+sex+(1+owner_presence+stranger_presence|subject)+(0+z.trial|subject),
              weights=prop_tracked_data_inv,
              data=hc.data, family=beta_family, control=contr)
 
 mm1_owner_vis_angle_null=glmmTMB(mean_vis_angle_owner_scaled~
-            1+
-            (1|subject)+ (0+owner_presence|subject)+(0+stranger_presence|subject), 
+            z.trial+z.age+sex+
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject), 
              weights=prop_tracked_data_inv,
              data=hc.data, family=beta_family, control=contr)
 
 anova(mm1_owner_vis_angle_null, mm1_owner_vis_angle, test="Chisq")
-#not significant
 
+summary(mm1_owner_vis_angle)
 overdisp.test(mm1_owner_vis_angle)
 
 ```
+```{r}
 
+summary(mm1_owner_vis_angle)
+drop1_mm1_owner_vis_angle<-drop1(mm1_owner_vis_angle, test="Chisq")
+drop1_mm1_owner_vis_angle
+```
+Relevelling the test predictors
+```{r}
+hc.data$owner_presence.rel<-relevel(hc.data$owner_presence, ref = "p")
+levels(hc.data$owner_presence.rel)
+hc.data$stranger_presence.rel<-relevel(hc.data$stranger_presence, ref = "p")
+levels(hc.data$stranger_presence.rel)
+
+mm2_owner_vis_angle=glmmTMB(mean_vis_angle_owner_scaled~owner_presence.rel*stranger_presence.rel+
+                              z.trial+z.age+sex+(1+owner_presence.rel+stranger_presence.rel|subject)+(0+z.trial|subject),
+             weights=prop_tracked_data_inv,
+             data=hc.data, family=beta_family, control=contr)
+
+summary(mm2_owner_vis_angle)
+```
+
+```{r}
+mm1_owner_vis_angle.drop1<-as.data.frame(drop1(mm1_owner_vis_angle, test="Chisq", control=contr))
+mm1_owner_vis_angle.drop1<-mm1_owner_vis_angle.drop1%>%filter(!is.na(Df))%>%add_row(Df = rep(NA,3),  .before = 1)
+mm1_owner_vis_angle.drop1
+```
+
+```{r}
+mm1_owner_vis_angle.ci=boot.glmmTMB(mm1_owner_vis_angle,hc.data, nboots=1000, para=T, n.cores = "all-1", )
+
+```
+### output table
+```{r}
+model_owner_vis_angle <- bind_cols(as.data.frame(summary(mm1_owner_vis_angle)$coefficients$cond),
+                            mm1_owner_vis_angle.drop1,                             
+                             mm1_owner_vis_angle.ci$ci.estimates$fe[1:7,]) %>%
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
+  mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
+  mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
+#  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+mutate(p=replace(p, p==0, "<0.001"))
+
+
+
+write.csv(model_owner_vis_angle, file = "saves/owner_vis_angle_mm1_output_table.csv")
+```
 
 ## Duration in owner proximity
 
@@ -694,13 +742,13 @@ hc.data$prop_duration_owner.scaled <- (hc.data$prop_duration_owner*(length(hc.da
 
 
 mm1_duration_owner=glmmTMB(prop_duration_owner.scaled ~owner_presence*stranger_presence+ z.trial+z.age+sex+
-            (1|subject)+ (0+owner_presence|subject),
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject),
              weights=prop_tracked_data_inv,
-             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+             data=hc.data, family=beta_family, control=contr)
 
 mm1_duration_owner_null=glmmTMB(prop_duration_owner.scaled~1+
-            z.trial+z.age+
-            (1|subject)+ (0+owner_presence|subject),
+            z.trial+z.age+sex+
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject),
              weights=prop_tracked_data_inv,
              data=hc.data, family=beta_family, control=contr)
 
@@ -723,29 +771,48 @@ library(car)
 xx=lm(prop_duration_owner.scaled~owner_presence+stranger_presence+z.trial+z.age+sex, data=hc.data)
 vif(xx)
 ```
+Relevelling the test predictors
 ```{r}
+hc.data$owner_presence.rel<-relevel(hc.data$owner_presence, ref = "p")
+levels(hc.data$owner_presence.rel)
+hc.data$stranger_presence.rel<-relevel(hc.data$stranger_presence, ref = "p")
+levels(hc.data$stranger_presence.rel)
 
-mm2_duration_owner=glmmTMB(prop_duration_owner.scaled ~owner_presence+stranger_presence+ z.trial+z.age+sex+
-            (1|subject)+ (0+owner_presence|subject),
+mm2_duration_owner=glmmTMB(prop_duration_owner.scaled ~owner_presence.rel*stranger_presence.rel+ z.trial+z.age+sex+
+            (1+owner_presence.rel+stranger_presence.rel|subject)+(0+z.trial|subject),
              weights=prop_tracked_data_inv,
-             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
-anova(mm2_duration_owner, mm1_duration_owner_null, test="Chisq")
+             data=hc.data, family=beta_family, control=contr)
+
 summary(mm2_duration_owner)
 ```
 
 
 ```{r}
-drop1(mm2_duration_owner, test="Chisq",  control=contr)#convergence problems
+
+mm1_duration_owner.drop1<-as.data.frame(drop1(mm1_duration_owner, test="Chisq", control=contr))
+mm1_duration_owner.drop1<-mm1_duration_owner.drop1%>%filter(!is.na(Df))%>%add_row(Df = rep(NA,3),  .before = 1)
+mm1_duration_owner.drop1
+
+```
+
+```{r}
+mm1_duration_owner.ci=boot.glmmTMB(mm1_duration_owner,hc.data, nboots=1000, para=T, n.cores = "all-1", )
+
 ```
 ### output table
 ```{r}
-model_duration_owner <- bind_cols(as.data.frame(summary(mm2_duration_owner)$coefficients$cond)) %>% 
-  select(Estimate, SE = `Std. Error`, `z value`, p = `Pr(>|z|)`) %>%
+model_duration_owner <- bind_cols(as.data.frame(summary(mm1_duration_owner)$coefficients$cond),
+                             mm1_duration_owner.drop1,                             
+                             mm1_duration_owner.ci$ci.estimates$fe[1:7,]) %>%
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
   mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
-  mutate(across(.cols = c(Estimate:`z value`), ~ format(round(.x, 2), nsmall=2)))%>% 
+  mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
+#  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
 mutate(p=replace(p, p==0, "<0.001"))
 
-write.csv(model_duration_owner, file = "saves/duration_owner_mm2_output_table.csv")
+
+
+write.csv(model_duration_owner, file = "saves/duration_owner_mm1_output_table.csv")
 ```
 
 
@@ -786,13 +853,13 @@ contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
 hc.data$prop_duration_stranger.scaled <- (hc.data$prop_duration_stranger*(length(hc.data$prop_duration_stranger) - 1) + 0.5)/length(hc.data$prop_duration_stranger) 
 
 
-mm1_duration_stranger=glmmTMB(prop_duration_stranger.scaled~owner_presence*stranger_presence+ z.trial+
-            (1|subject)+ (0+owner_presence|subject)+ (0+stranger_presence|subject),
+mm1_duration_stranger=glmmTMB(prop_duration_stranger.scaled~owner_presence*stranger_presence+ z.trial+z.age+sex+
+            (1+owner_presence+stranger_presence|subject),
              weights=prop_tracked_data_inv,
-             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+             data=hc.data, family=beta_family, control=contr)#pruned due overdispersion issues
 
-mm1_duration_stranger_null=glmmTMB(prop_duration_stranger.scaled~ z.trial+
-            (1|subject)+ (0+owner_presence|subject)+ (0+stranger_presence|subject),
+mm1_duration_stranger_null=glmmTMB(prop_duration_stranger.scaled~z.trial+z.age+sex+
+            (1+owner_presence+stranger_presence|subject),
              weights=prop_tracked_data_inv,
              data=hc.data, family=beta_family, control=contr)
 
@@ -815,37 +882,46 @@ library(car)
 xx=lm(prop_duration_stranger.scaled~owner_presence+stranger_presence+z.trial+z.age+sex, data=hc.data)
 vif(xx)
 ```
+
 ```{r}
 
-mm2_duration_stranger=glmmTMB(prop_duration_stranger.scaled ~owner_presence+stranger_presence+ z.trial+sex+
-            (1|subject)+ (0+owner_presence|subject)+ (0+stranger_presence|subject),
+mm2_duration_stranger=glmmTMB(prop_duration_stranger.scaled ~owner_presence+stranger_presence+ z.trial+z.age+ sex+
+            (1+owner_presence+stranger_presence|subject),
              weights=prop_tracked_data_inv,
-             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+             data=hc.data, family=beta_family, control=contr)#pruned due overdispersion issues
 
-mm2_duration_stranger_null=glmmTMB(prop_duration_stranger.scaled ~ z.trial+sex+
-            (1|subject)+ (0+owner_presence|subject)+ (0+stranger_presence|subject),
+mm2_duration_stranger_null=glmmTMB(prop_duration_stranger.scaled ~ z.trial+z.age+sex+
+            (1+owner_presence+stranger_presence|subject),
              weights=prop_tracked_data_inv,
-             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+             data=hc.data, family=beta_family, control=contr)#pruned due overdispersion issues
 anova(mm2_duration_stranger, mm2_duration_stranger_null, test="Chisq")
 summary(mm2_duration_stranger)
 ```
 
 
 ```{r}
-drop1(mm2_duration_stranger, test="Chisq",  control=contr)#convergence problems
+mm2_duration_stranger.drop1<-drop1(mm2_duration_stranger, test="Chisq",  control=contr)
 ```
+```{r}
+mm2_duration_stranger.ci=boot.glmmTMB(mm2_duration_stranger,hc.data, nboots=1000, para=T, n.cores = "all-1", )
+
+```
+
 
 ### output table
 
 ```{r}
 
 
-model_duration_stranger <- bind_cols(as.data.frame(summary(mm2_duration_stranger)$coefficients$cond)) %>% 
-  select(Estimate, SE = `Std. Error`, `z value`, p = `Pr(>|z|)`) %>%
+model_duration_stranger <- bind_cols(as.data.frame(summary(mm2_duration_stranger)$coefficients$cond),
+                             mm2_duration_stranger.drop1,                             
+                             mm2_duration_stranger.ci$ci.estimates$fe[1:6,]) %>%
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
   mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
-  mutate(across(.cols = c(Estimate:`z value`), ~ format(round(.x, 2), nsmall=2))) %>% 
-  #mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+  mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
+#  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
 mutate(p=replace(p, p==0, "<0.001"))
+
 
 write.csv(model_duration_stranger, file = "saves/duration_stranger_mm2_output_table.csv")
 ```
@@ -884,15 +960,15 @@ hc.data$prop_tracked_data_inv<-1/hc.data$prop_tracked_data
 contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
 
 hc.data$prop_duration_door.scaled <- (hc.data$prop_duration_door*(length(hc.data$prop_duration_door) - 1) + 0.5)/length(hc.data$prop_duration_door) 
+min(hc.data$prop_duration_door.scaled)
 
-
-mm1_duration_door=glmmTMB(prop_duration_door.scaled~owner_presence*stranger_presence+ z.trial+z.age + 
-            (1|subject)+ (0+owner_presence|subject),
+mm1_duration_door=glmmTMB(prop_duration_door.scaled~owner_presence*stranger_presence+ z.trial+z.age + sex+
+            (1+owner_presence+stranger_presence|subject),
              weights=prop_tracked_data_inv,
-             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+             data=hc.data, family=beta_family, control=contr)
 
-mm1_duration_door_null=glmmTMB(prop_duration_door.scaled~ z.age + 
-            (1|subject)+ (0+owner_presence|subject),
+mm1_duration_door_null=glmmTMB(prop_duration_door.scaled~ z.trial+z.age + sex+
+            (1+owner_presence+stranger_presence|subject),
              weights=prop_tracked_data_inv,
              data=hc.data, family=beta_family, control=contr)
 
@@ -915,39 +991,133 @@ library(car)
 xx=lm(prop_duration_door.scaled~owner_presence+stranger_presence+z.trial+z.age+sex, data=hc.data)
 vif(xx)
 ```
+
 ```{r}
 
-mm2_duration_door=glmmTMB(prop_duration_door.scaled ~owner_presence+stranger_presence+z.trial+
-            (1|subject)+ (0+owner_presence|subject),
+mm2_duration_door=glmmTMB(prop_duration_door.scaled ~owner_presence+stranger_presence+z.trial+z.age + sex+
+            (1+owner_presence+stranger_presence|subject),
              weights=prop_tracked_data_inv,
-             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+             data=hc.data, family=beta_family, control=contr)
 
-mm2_duration_door_null=glmmTMB(prop_duration_door.scaled ~ 1+
-            (1|subject)+ (0+owner_presence|subject),
+mm2_duration_door_null=glmmTMB(prop_duration_door.scaled ~ z.trial+z.age + sex+
+            (1+owner_presence+stranger_presence|subject),
              weights=prop_tracked_data_inv,
-             data=hc.data, family=beta_family, control=contr)#pruned due non-convergence
+             data=hc.data, family=beta_family, control=contr)
 anova(mm2_duration_door, mm2_duration_door_null, test="Chisq")
 summary(mm2_duration_door)
 ```
 
 
 ```{r}
-drop1(mm2_duration_door, test="Chisq",  control=contr)#convergence problems
+mm2_duration_door.drop1<-drop1(mm2_duration_door, test="Chisq",  control=contr)
 ```
+
+```{r}
+
+mm2_duration_door.ci=boot.glmmTMB(mm2_duration_door,hc.data, nboots=1000, para=T, n.cores = "all-1", excl.non.conv=T, contr=contr)#results in error message
+
+```
+### output table
+
+```{r}
+
+
+model_duration_door <- bind_cols(as.data.frame(summary(mm2_duration_door)$coefficients$cond),
+                             mm2_duration_door.drop1) %>%
+  select(Estimate, SE = `Std. Error`,  Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
+  mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
+  mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
+#  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+mutate(p=replace(p, p==0, "<0.001"))
+
+write.csv(model_duration_door, file = "saves/duration_door_mm2_output_table.csv")
+```
+
+
+### tail angle analysis
+```{r}
+tail.tip.data$tail_angle_mean_trans<-(tail.tip.data$tail_angle_mean+180)/360
+mean(tail.tip.data$tail_angle_mean)
+sd(tail.tip.data$tail_angle_mean)/sqrt(length(tail.tip.data$tail_angle_mean))
+t.test(tail.tip.data$tail_angle_mean, mu=0.5)
+min(tail.tip.data$tail_angle_mean)
+max(tail.tip.data$tail_angle_mean)
+
+hist(tail.tip.data$tail_angle_mean_trans)
+min(tail.tip.data$tail_angle_mean_trans)
+max(tail.tip.data$tail_angle_mean_trans)
+
+
+contr<-glmmTMBControl(optCtrl=list(iter.max=100000000, eval.max=100000000))
+```
+
+Intercept only model
+```{r}
+mm2_tail_angle_intercept_only=glmmTMB(tail_angle_mean_trans~1+
+            (1|subject),
+             weights=tail_tip_ratio,
+             data=tail.tip.data, family=beta_family, control=contr)
+summary(mm2_tail_angle_intercept_only)
+```
+
+Comparison between conditions
+```{r}
+mm1_tail_angle=glmmTMB(tail_angle_mean_trans~owner_presence*stranger_presence+ z.trial+z.age + sex+
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject),
+             weights=tail_tip_ratio,
+             data=tail.tip.data, family=beta_family, control=contr)
+
+mm1_tail_angle_null=glmmTMB(tail_angle_mean_trans~z.trial+z.age + sex+
+            (1+owner_presence+stranger_presence|subject)+(0+z.trial|subject),
+             weights=tail_tip_ratio,
+             data=tail.tip.data, family=beta_family, control=contr)
+overdisp.test(mm1_tail_angle)
+anova(mm1_tail_angle, mm1_tail_angle_null, test="Chisq")
+summary(mm1_tail_angle)
+
+drop1(mm1_tail_angle, test="Chisq")
+```
+
+
+```{r}
+
+mm2_tail_angle=glmmTMB(tail_angle_mean_trans~owner_presence.rel*stranger_presence.rel+ z.trial+z.age + sex+
+            (1+owner_presence.rel+stranger_presence.rel|subject)+(0+z.trial|subject),
+             weights=tail_tip_ratio,
+             data=tail.tip.data, family=beta_family, control=contr)
+summary(mm2_tail_angle)
+```
+
+```{r}
+mm1_tail_angle.drop1<-drop1(mm1_tail_angle, test="Chisq",  control=contr)
+mm1_tail_angle.drop1<-mm1_tail_angle.drop1%>%filter(!is.na(Df))%>%add_row(Df = rep(NA,3),  .before = 1)
+```
+
+```{r}
+mm1_tail_angle.ci=boot.glmmTMB(mm1_tail_angle,tail.tip.data, nboots=1000, para=T, n.cores = "all-1")
+
+```
+
 
 ### output table
 
 ```{r}
 
 
-model_duration_door <- bind_cols(as.data.frame(summary(mm2_duration_door)$coefficients$cond)) %>% 
-  select(Estimate, SE = `Std. Error`, `z value`, p = `Pr(>|z|)`) %>%
+model_tail_angle <- bind_cols(as.data.frame(summary(mm1_tail_angle)$coefficients$cond),
+                             mm1_tail_angle.drop1,                             
+                             mm1_tail_angle.ci$ci.estimates$fe[1:7,]) %>%
+  select(Estimate, SE = `Std. Error`, LowerCI = X2.5., UpperCI = X97.5., Chi2 = LRT, df = Df, p = `Pr(>Chi)`) %>%
   mutate(across(.cols = c(p), ~ format(round(.x, 3), nsmall=3))) %>% 
-  mutate(across(.cols = c(Estimate:`z value`), ~ format(round(.x, 2), nsmall=2)))%>% 
-  mutate(p=replace(p, p==0, "<0.001"))
+  mutate(across(.cols = c(Estimate:Chi2), ~ format(round(.x, 2), nsmall=2))) %>% 
+#  mutate(across(Chi2:p, ~replace_na(.x, "")))%>%
+mutate(p=replace(p, p==0, "<0.001"))
 
-write.csv(model_duration_door, file = "saves/duration_door_mm2_output_table.csv")
+
+write.csv(model_tail_angle, file = "saves/tail_angle_mm1_output_table.csv")
 ```
+
+
 
 
 
@@ -1033,14 +1203,14 @@ library(corrplot)
 
 
 png(file = "graphics/cor_mat.png", width = 30, height=15, units="cm", res=700)
-corrplot(corr[13:16,],method="color",   p.mat = p.mat[13:16,], sig.level = c(0.001, 0.01, 0.05), pch.cex = 0.9, insig = 'label_sig', pch.col = 'grey20', tl.col = 'black')
+corrplot(corr[13:16,],method="color",   pch.col = 'grey20', tl.col = 'black')# p.mat = p.mat[13:16,], sig.level = c(0.001, 0.01, 0.05), pch.cex = 0.9, insig = 'label_sig',
 
 dev.off()
 
 library(ggstatsplot)
 cormat2<-ggcorrmat(
   data=cor.data,
-  p.adjust.method = "none",
+  p.adjust.method = "hommel",
   )
 
 ggsave(cormat2, filename="graphics/cormat_all_tasks_reduced2.png", width=25, height=25, scale=0.8)
@@ -1126,6 +1296,33 @@ ylab("Tail wagging ratio")+
 
 tail.plot2 
 ```
+#### Tail Angle
+```{r}
+tail.tip.data<-tail.tip.data%>%
+    mutate(condition2=fct_recode(as.factor(condition), "O+ / S+"="bp", "O- / S+"="sp", "O+ / S-"="op", "O- / S-"="np"))%>%
+  mutate(condition2=fct_relevel(condition2, "O+ / S+", "O+ / S-","O- / S+",  "O- / S-"))
+
+tail.angle.plot <- ggplot(data = tail.tip.data, aes(y = tail_angle_mean, x = condition2, fill = condition2)) +
+geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8) +
+geom_point(aes(y = tail_angle_mean, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
+geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) +
+expand_limits(x = 5.25) +
+guides(fill = FALSE) +
+guides(color = FALSE) +
+#scale_color_brewer(palette = "Spectral") +
+#scale_fill_brewer(palette = "Spectral") +
+#coord_flip() +
+scale_colour_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+scale_fill_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue"))+
+
+  theme_bw() +
+raincloud_theme+
+xlab("") + 
+ylab("Mean tail angle (in deg)")#+
+ # ylim(0,1)
+
+tail.angle.plot 
+```
 
 #### Area plot
 
@@ -1197,10 +1394,11 @@ hc.data<-hc.data%>%
     mutate(condition2=fct_recode(as.factor(condition), "O+ / S+"="bp", "O- / S+"="sp", "O+ / S-"="op", "O- / S-"="np"))%>%
   mutate(condition2=fct_relevel(condition2, "O+ / S+", "O+ / S-","O- / S+",  "O- / S-"))
 
+hc.data$mean_vis_angle_owner_deg <- hc.data$mean_vis_angle_owner *180 / pi
 levels(hc.data$condition2)
-vis.angle.owner.plot2 <- ggplot(data = hc.data, aes(y = mean_vis_angle_owner_scaled, x = condition2, fill = condition2)) +
+vis.angle.owner.plot2 <- ggplot(data = hc.data, aes(y = mean_vis_angle_owner_deg, x = condition2, fill = condition2)) +
 geom_flat_violin(position = position_nudge(x = .2, y = 0), alpha = .8) +
-geom_point(aes(y = mean_vis_angle_owner_scaled, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
+geom_point(aes(y = mean_vis_angle_owner_deg, color = condition2), position = position_jitter(width = .15), size = 1, alpha = 0.8) +
 geom_boxplot(width = .1, guides = FALSE, outlier.shape = NA, alpha = 0.5) +
 expand_limits(x = 5.25) +
 guides(fill = FALSE) +
@@ -1214,8 +1412,8 @@ scale_fill_manual(values = c("darkred", "darkorange", "darkgreen", "dodgerblue")
   theme_bw() +
 raincloud_theme+
 xlab("") + 
-ylab("Vis. angle to owner chair (scaled)")+
-  ylim(0,0.8)
+ylab("Vis. angle to owner chair (in deg)")#+
+#  ylim(0,1)
 
 vis.angle.owner.plot2 
 ```
@@ -1315,20 +1513,24 @@ door.duration.plot
 
 ```{r}
 library(cowplot)
-pg2<-plot_grid(distance.plot2, object.distance.plot2, area.plot2, tail.plot2, ncol=2,  labels=c("A", "B", "C", "D"))
+pg2<-plot_grid(distance.plot2, object.distance.plot2, area.plot2, vis.angle.owner.plot2, tail.plot2, tail.angle.plot , ncol=2,  labels=c("A", "B", "C", "D", "E", "F"))
 
-ggsave(pg2, filename = "graphics/dog_exploration_pg3.png", width=12, height=12, scale=0.85)
+ggsave(pg2, filename = "graphics/dog_exploration_pg3.png", width=12, height=18, scale=0.85)
+ggsave(pg2, filename = "graphics/dog_exploration_pg3.pdf", width=12, height=18, scale=0.85)
 ```
 
 ```{r}
 
 library(cowplot)
-pg3<-plot_grid(owner.duration.plot , stranger.duration.plot , door.duration.plot , nrow=3,  labels=c("B", "C", "D"), label_size = 20)
+pg3<-plot_grid(owner.duration.plot , stranger.duration.plot , door.duration.plot , nrow=1,  labels=c("B", "C", "D"), label_size = 20)
 
 #execute script in 01_dog_tracking_data_processing
-pg4<-plot_grid(p3, pg3, ncol=2,  labels=c("A", ""), rel_widths =c(1, 0.35), label_size = 20 )
+#pg4<-plot_grid(p3, pg3, ncol=2,  labels=c("A", ""), rel_widths =c(1, 0.35), label_size = 20 )
+pg4<-plot_grid(p3, pg3, nrow=2,  labels=c("A", ""), rel_heights = c(1, 0.5), label_size = 20 )
 
-ggsave(pg4, filename = "graphics/dog_exploration_duration_pg4.png", width=13, height=9, scale=1.4)
+ggsave(pg4, filename = "graphics/dog_exploration_duration_pg4.png", width=11, height=13, scale=1.1)
+
+ggsave(pg4, filename = "graphics/dog_exploration_duration_pg4.pdf", width=11, height=13, scale=1.1)
 ```
 
 
@@ -1380,12 +1582,25 @@ ggsave(cormat.all.tasks, filename = "graphics/distance_corplot.png", width=6, he
 library(cowplot)
 #execute script in 01_dog_tracking_data_processing
 pg5<-plot_grid(hs_plot2, cormat.all.tasks, labels = c("B", "C"), rel_widths = c(1,1.3))
-pg6<-plot_grid(p.example, pg5, labels = c("A", ""), nrow=2, rel_heights = c(1,1.3))
+pg6<-plot_grid(p.example2, pg5, labels = c("A", ""), nrow=2, rel_heights = c(1,1.3))
 
 ggsave(pg6, filename = "graphics/validation_pg.png", width=10, height=10, scale=0.8)
+ggsave(pg6, filename = "graphics/validation_pg.pdf", width=10, height=10, scale=0.8)
 ```
 
 
+### Correlations between 3D Tracking Data and manual scoring
+
+```{r}
+manual_scorings <- read.csv(file = "data/dog_exploration_3Dtracking_agg_scoringdata.csv") %>%
+  full_join(hc.data)%>%
+  mutate(door = door_left + door_right)
+
+cor.test(manual_scorings$caregiver, manual_scorings$prop_duration_owner, method="pearson")
+cor.test(manual_scorings$stranger, manual_scorings$prop_duration_stranger, method="pearson")
+cor.test(manual_scorings$door, manual_scorings$prop_duration_door, method="pearson")
+
+```
 
 
 

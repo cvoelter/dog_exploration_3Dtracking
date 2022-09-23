@@ -67,16 +67,34 @@ demographics.data<-read.csv(file="data/dog_tracking_project_data.csv")%>%
 
 ```
 
+```{r}
+trial.duration.data <-  read.csv(file = "data/dog_exploration_3Dtracking_scoringdata.csv")%>%
+  filter(Behaviour=="trial")%>%
+  separate(Scoring,  into=c(NA,NA,NA,"subject","condition"), sep = "_") %>% #add info from filenames
+  select(Start_Frame, Stop_Frame, subject, condition)
+
+
+xx<-trial.duration.data%>%
+  pivot_longer(cols=Start_Frame:Stop_Frame, values_to="frame_count", names_to="start_stop")%>%
+  group_by(subject, condition)%>%
+  complete(frame_count=seq(from=min(frame_count, na.rm=TRUE), to=max(frame_count, na.rm=TRUE)))
+
+```
 
 ### Filtered, interpolated, and smoothed data: all keypoints in one plot 
 
-```{r eval=FALSE}
-xdata<-xdata%>%mutate(subject_condition=paste(subject, condition, sep="_"))
+```{r}
+xdata<-xdata%>%
+  inner_join(xx)%>% #filter out data that don't belong to the trial
+  mutate(subject_condition=paste(subject, condition, sep="_"))
 subjects = unique(xdata$subject)
 names = unique(xdata$name)
 conditions =unique(xdata$condition)
 subject_conditions =unique(xdata$subject_condition)
+```
 
+
+```{r}
 library(zoo)
 subject_dfs = list()
 subject_average_dfs = list()
@@ -98,13 +116,13 @@ subject_dfs[[subject_condition_]]<-xdata %>% filter(subject_condition == subject
   filter((abs(x-lag(x))<1.5 & abs(y-lag(y))<1.5 & abs(z-lag(z))<1.5 & abs(x-lead(x))<1.5 & abs(y-lead(y))<1.5 & abs(z-lead(z))<1.5))%>% #filter out jumps of 0.5m and more
   complete(frame_count=seq(from=min(frame_count, na.rm=TRUE), to=max(frame_count, na.rm=TRUE)))%>% #add all missing frames
   mutate(x_approx = na.approx(x,  na.rm = TRUE),y_approx = na.approx(y,  na.rm = TRUE), z_approx = na.approx(z,  na.rm = TRUE))%>% #first linear interpolation
-  filter((abs(x_approx-lag(x_approx))<0.2 & abs(y_approx-lag(y_approx))<0.2 & abs(z_approx-lag(z_approx))<0.2 & abs(x_approx-lead(x_approx))<0.2 & abs(y_approx-lead(y_approx))<0.2 & abs(z_approx-lead(z_approx))<0.2))%>% #filter out jumps of 20cm and more between two consecutive frames
+  filter((abs(x_approx-lag(x_approx))<0.4 & abs(y_approx-lag(y_approx))<0.4 & abs(z_approx-lag(z_approx))<0.4 & abs(x_approx-lead(x_approx))<0.4 & abs(y_approx-lead(y_approx))<0.4 & abs(z_approx-lead(z_approx))<0.4))%>% #filter out jumps of 20cm and more between two consecutive frames
   complete(frame_count=seq(from=min(frame_count, na.rm=TRUE), to=max(frame_count, na.rm=TRUE)))%>% #add all missing frames
     mutate(x_approx = na.approx(x_approx, na.rm = TRUE),y_approx = na.approx(y_approx,  na.rm = TRUE), z_approx = na.approx(z_approx,  na.rm = TRUE))%>% # second linear interpolation
-  filter((abs(x_approx-lag(x_approx))<0.2 & abs(y_approx-lag(y_approx))<0.2 & abs(z_approx-lag(z_approx))<0.2 & abs(x_approx-lead(x_approx))<0.2 & abs(y_approx-lead(y_approx))<0.2 & abs(z_approx-lead(z_approx))<0.2))%>% #filter out jumps of 20cm and more between two consecutive frames
+  filter((abs(x_approx-lag(x_approx))<0.4 & abs(y_approx-lag(y_approx))<0.4 & abs(z_approx-lag(z_approx))<0.4 & abs(x_approx-lead(x_approx))<0.4 & abs(y_approx-lead(y_approx))<0.4 & abs(z_approx-lead(z_approx))<0.4))%>% #filter out jumps of 20cm and more between two consecutive frames
   complete(frame_count=seq(from=min(frame_count, na.rm=TRUE), to=max(frame_count, na.rm=TRUE)))%>% #add all missing frames
     mutate(x_approx = na.approx(x_approx, na.rm = TRUE),y_approx = na.approx(y_approx,  na.rm = TRUE), z_approx = na.approx(z_approx,  na.rm = TRUE))%>% # third linear interpolation
-  filter((abs(x_approx-lag(x_approx))<0.2 & abs(y_approx-lag(y_approx))<0.2 & abs(z_approx-lag(z_approx))<0.2 & abs(x_approx-lead(x_approx))<0.2 & abs(y_approx-lead(y_approx))<0.2 & abs(z_approx-lead(z_approx))<0.2))%>% #filter out jumps of 20cm and more between two consecutive frames
+  filter((abs(x_approx-lag(x_approx))<0.4 & abs(y_approx-lag(y_approx))<0.4 & abs(z_approx-lag(z_approx))<0.4 & abs(x_approx-lead(x_approx))<0.4 & abs(y_approx-lead(y_approx))<0.4 & abs(z_approx-lead(z_approx))<0.4))%>% #filter out jumps of 20cm and more between two consecutive frames
   complete(frame_count=seq(from=min(frame_count, na.rm=TRUE), to=max(frame_count, na.rm=TRUE)))%>% #add all missing frames
     mutate(x_approx = na.approx(x_approx, na.rm = TRUE),y_approx = na.approx(y_approx,  na.rm = TRUE), z_approx = na.approx(z_approx,  na.rm = TRUE))%>% # 4th linear interpolation
   mutate(x_approx_roll = zoo::rollmean(x_approx, k = 3, fill = NA), y_approx_roll = zoo::rollmean(y_approx, k = 3, fill = NA),z_approx_roll = zoo::rollmean(z_approx, k = 3, fill = NA)) #rolling average
@@ -150,16 +168,16 @@ xdata.int<-xdata%>%
   inner_join(average_coordinates)%>%
   filter(x<3.8 & x >(-3.5))%>% filter(z<1.5)%>%filter(y<3.7 & y>(-2.7))%>% #filter out unrealistic values
   filter(abs(x-average_x)<1 & abs(y-average_y)<1 & abs(z-average_z)<1)%>% #filter out values that deviate from average value
-  filter((abs(x-lag(x))<1.5 & abs(y-lag(y))<1.5 & abs(z-lag(z))<1.5 & abs(x-lead(x))<1.5 & abs(y-lead(y))<1.5 & abs(z-lead(z))<1.5))%>% #filter out jumps of 0.5m and more
+  filter((abs(x-lag(x))<1.5 & abs(y-lag(y))<1.5 & abs(z-lag(z))<1.5 & abs(x-lead(x))<1.5 & abs(y-lead(y))<1.5 & abs(z-lead(z))<1.5))%>% #filter out jumps of 1.5m and more
   complete(frame_count=seq(from=min(frame_count, na.rm=TRUE), to=max(frame_count, na.rm=TRUE)))%>% #add all missing frames
   mutate(x_approx = na.approx(x,  na.rm = TRUE),y_approx = na.approx(y,  na.rm = TRUE), z_approx = na.approx(z,  na.rm = TRUE))%>% #first linear interpolation
-  filter((abs(x_approx-lag(x_approx))<0.2 & abs(y_approx-lag(y_approx))<0.2 & abs(z_approx-lag(z_approx))<0.2 & abs(x_approx-lead(x_approx))<0.2 & abs(y_approx-lead(y_approx))<0.2 & abs(z_approx-lead(z_approx))<0.2))%>% #filter out jumps of 20cm and more between two consecutive frames
+  filter((abs(x_approx-lag(x_approx))<0.4 & abs(y_approx-lag(y_approx))<0.4 & abs(z_approx-lag(z_approx))<0.4 & abs(x_approx-lead(x_approx))<0.4 & abs(y_approx-lead(y_approx))<0.4 & abs(z_approx-lead(z_approx))<0.4))%>% #filter out jumps of 40cm and more between two consecutive frames
   complete(frame_count=seq(from=min(frame_count, na.rm=TRUE), to=max(frame_count, na.rm=TRUE)))%>% #add all missing frames
     mutate(x_approx = na.approx(x_approx, na.rm = TRUE),y_approx = na.approx(y_approx,  na.rm = TRUE), z_approx = na.approx(z_approx,  na.rm = TRUE))%>% # second linear interpolation
-  filter((abs(x_approx-lag(x_approx))<0.2 & abs(y_approx-lag(y_approx))<0.2 & abs(z_approx-lag(z_approx))<0.2 & abs(x_approx-lead(x_approx))<0.2 & abs(y_approx-lead(y_approx))<0.2 & abs(z_approx-lead(z_approx))<0.2))%>% #filter out jumps of 20cm and more between two consecutive frames
+  filter((abs(x_approx-lag(x_approx))<0.4 & abs(y_approx-lag(y_approx))<0.4 & abs(z_approx-lag(z_approx))<0.4 & abs(x_approx-lead(x_approx))<0.4 & abs(y_approx-lead(y_approx))<0.4 & abs(z_approx-lead(z_approx))<0.4))%>% #filter out jumps of 40cm and more between two consecutive frames
   complete(frame_count=seq(from=min(frame_count, na.rm=TRUE), to=max(frame_count, na.rm=TRUE)))%>% #add all missing frames
     mutate(x_approx = na.approx(x_approx, na.rm = TRUE),y_approx = na.approx(y_approx,  na.rm = TRUE), z_approx = na.approx(z_approx,  na.rm = TRUE))%>% # third linear interpolation
-  filter((abs(x_approx-lag(x_approx))<0.2 & abs(y_approx-lag(y_approx))<0.2 & abs(z_approx-lag(z_approx))<0.2 & abs(x_approx-lead(x_approx))<0.2 & abs(y_approx-lead(y_approx))<0.2 & abs(z_approx-lead(z_approx))<0.2))%>% #filter out jumps of 20cm and more between two consecutive frames
+  filter((abs(x_approx-lag(x_approx))<0.4 & abs(y_approx-lag(y_approx))<0.4 & abs(z_approx-lag(z_approx))<0.4 & abs(x_approx-lead(x_approx))<0.4 & abs(y_approx-lead(y_approx))<0.4 & abs(z_approx-lead(z_approx))<0.4))%>% #filter out jumps of 40cm and more between two consecutive frames
   complete(frame_count=seq(from=min(frame_count, na.rm=TRUE), to=max(frame_count, na.rm=TRUE)))%>% #add all missing frames
     mutate(x_approx = na.approx(x_approx, na.rm = TRUE),y_approx = na.approx(y_approx,  na.rm = TRUE), z_approx = na.approx(z_approx,  na.rm = TRUE))%>% # 4th linear interpolation
   mutate(x_approx_roll = zoo::rollmean(x_approx, k = 3, fill = NA), y_approx_roll = zoo::rollmean(y_approx, k = 3, fill = NA),z_approx_roll = zoo::rollmean(z_approx, k = 3, fill = NA))%>% #rolling average
@@ -179,7 +197,7 @@ xdata.int<-xdata%>%
 ```
 
 
-Calculate the area covered by the dog (based on grid with cells of 10 x 10 cm)
+### Calculate the area covered by the dog (based on grid with cells of 10 x 10 cm)
 ```{r}
 vis.data<-xdata.int%>%
   select(subject, name, condition, frame_count, head_centre.snout, x_approx_roll, y_approx_roll, z_approx_roll)%>%
@@ -242,7 +260,7 @@ area_covered_50cm<-ggplot(data=area.data, aes(x=condition, y=area_covered))+
 area_covered_50cm
 ```
 
-#calculate visual angle
+### calculate visual angle
 ```{r}
 source("./functions/angle_functions.r")
 eye.frac=0.5
@@ -298,6 +316,141 @@ vis.angle.summary.data<-vis.angle.data%>%
   group_by(subject, condition)%>%
   summarise(prop_look_chair_door=sum(vis_angle_chair_door<(vis_angle), na.rm = TRUE)/length(vis_angle_chair_door), mean_angle_chair_door=mean(vis_angle_chair_door, na.rm = TRUE), min_angle_chair_door=min(vis_angle_chair_door, na.rm = TRUE), prop_look_chair_window=sum(vis_angle_chair_window<(vis_angle), na.rm = TRUE)/length(vis_angle_chair_window), mean_angle_chair_window=mean(vis_angle_chair_window, na.rm = TRUE), min_angle_chair_window=min(vis_angle_chair_window, na.rm = TRUE))
 ```
+### Tail angle
+First the proportion of data available for the tail angle
+```{r}
+source("./functions/tail_angle_function.r")
+
+frame.count.df<- xdata.int %>%
+  ungroup()%>%
+  group_by(subject,condition,  frame_count)%>%
+  summarise(frame_count=mean(frame_count))%>%
+  ungroup()
+
+tailtip.data.raw<-xdata.int%>%
+  ungroup()%>%
+  select(subject, name, condition, frame_count, x, y)%>%
+  filter(name=="tail_tip")%>%
+  full_join(frame.count.df)%>%
+  mutate(name="tail_tip")
+
+atlas.data.raw<-xdata.int%>%
+  ungroup()%>%
+  select(subject, name, condition,frame_count, x, y)%>%
+  filter(name=="atlas")%>%
+  full_join(frame.count.df)%>%
+  mutate(name="atlas")
+
+tailbase.data.raw<-xdata.int%>%
+  ungroup()%>%
+  select(subject, name, condition, frame_count, x, y)%>%
+  filter(name=="tail_base")%>%
+  full_join(frame.count.df)%>%
+  mutate(name="tail_base")
+
+
+
+tail.data_raw<-tailtip.data.raw%>%
+  full_join(atlas.data.raw)%>%
+  full_join(tailbase.data.raw)%>%
+  mutate(subject_condition=paste(subject, condition, sep="_"))%>%
+  group_by(subject, condition, frame_count)%>%
+  pivot_wider(names_from=name, values_from=c(x, y))%>%
+  unchop(everything())
+
+
+tail_angles_raw=sapply(1:nrow(tail.data_raw), function(x){
+	if(all(!is.na(tail.data_raw[x, c("x_atlas", "y_atlas", "x_tail_base", "y_tail_base", "x_tail_tip", "y_tail_tip")]))){
+
+		v.angle(tailtip.loc=c(x=tail.data_raw$x_tail_tip[x],	
+		                                        y=tail.data_raw$y_tail_tip[x]),
+		                   tailbase.loc=c(x=tail.data_raw$x_tail_base[x],	
+		                                        y=tail.data_raw$y_tail_base[x]),
+														atlas.loc=c(x=tail.data_raw$x_atlas[x], 
+																				y=tail.data_raw$y_atlas[x]))
+	}else{
+		return(NA)
+	}
+})
+
+
+tail.angle.data_raw<-as.data.frame(cbind(tail.data_raw, tail_angle=as.numeric(tail_angles_raw)))
+
+
+```
+
+```{r}
+source("./functions/tail_angle_function.r")
+
+tail.data<-xdata.int%>%
+  select(subject, name, condition, frame_count, x_approx_roll, y_approx_roll)%>%
+mutate(subject_condition=paste(subject, condition, sep="_"))%>%
+  pivot_wider(names_from=name, values_from=c(x_approx_roll, y_approx_roll))
+
+
+tail_angles=sapply(1:nrow(tail.data), function(x){
+	if(all(!is.na(tail.data[x, c("x_approx_roll_atlas", "y_approx_roll_atlas", "x_approx_roll_tail_base", "y_approx_roll_tail_base", "x_approx_roll_tail_tip", "y_approx_roll_tail_tip")]))){
+
+		v.angle(tailtip.loc=c(x=tail.data$x_approx_roll_tail_tip[x],	
+		                                        y=tail.data$y_approx_roll_tail_tip[x]),
+		                   tailbase.loc=c(x=tail.data$x_approx_roll_tail_base[x],	
+		                                        y=tail.data$y_approx_roll_tail_base[x]),
+														atlas.loc=c(x=tail.data$x_approx_roll_atlas[x], 
+																				y=tail.data$y_approx_roll_atlas[x]))
+	}else{
+		return(NA)
+	}
+})
+
+
+tail.angle.data<-as.data.frame(cbind(tail.data, tail_angle=as.numeric(tail_angles)))
+```
+
+```{r}
+
+tail.angle.ind.data.raw<-tail.angle.data_raw%>%
+  group_by(subject, condition)%>%
+  summarise(tail_angle_prop_tracked=1-(sum(is.na(tail_angle))/length(tail_angle)))%>%
+  ungroup()
+
+tail.angle.ind.data<-tail.angle.data%>%
+  group_by(subject, condition)%>%
+  summarise(tail_angle_mean=mean(tail_angle, na.rm=TRUE), tail_angle_median=median(tail_angle, na.rm=TRUE))%>%
+  ungroup()%>%
+  full_join(tail.angle.ind.data.raw)
+
+
+tail_plot<- ggplot(data=tail.angle.ind.data, aes(x=reorder(subject, tail_angle_median), y=tail_angle_median))+
+  geom_bar(stat="identity", alpha=tail.angle.ind.data$tail_angle_prop_tracked)+
+  facet_wrap(~condition)+
+ # theme(axis.text.x = element_text(angle = 90,  vjust=0))+
+  theme_bw()+
+  coord_flip()+
+  ylab("Median tail angle")+
+  xlab("Subjects")
+
+ggsave(tail_plot, filename = "graphics/tail_plot.png", width = 12, height=12, scale=0.7)
+```
+
+
+```{r}
+tail_ttest_data<-tail.angle.data%>%
+  group_by(subject, condition)%>%
+  summarise(median=median(tail_angle, na.rm=TRUE))%>%
+  #filter(condition=="op"| condition=="bp")%>%
+  pivot_wider(names_from=condition, values_from=median)
+
+t.test(tail_ttest_data$op, tail_ttest_data$bp, paired=TRUE)
+t.test(tail_ttest_data$op)
+t.test(tail_ttest_data$sp)
+t.test(tail_ttest_data$bp)
+t.test(tail_ttest_data$np)
+
+
+
+
+```
+
 
 
 ### summary distance data (for analysis)
@@ -309,6 +462,7 @@ distance.data<-xdata.int%>%
             mean.distance.chair.door=mean(distance_chair_door, na.rm=TRUE), mean.distance.chair.window=mean(distance_chair_window, na.rm=TRUE), min.distance.chair.door=min(distance_chair_door, na.rm=TRUE), min.distance.chair.window=min(distance_chair_window, na.rm=TRUE), min.distance.obj.dr=min(distance_obj_dr, na.rm=TRUE), min.distance.obj.dl=min(distance_obj_dl, na.rm=TRUE),  min.distance.obj.wr=min(distance_obj_wr, na.rm=TRUE), min.distance.obj.wl=min(distance_obj_wl, na.rm=TRUE), prop_chair_door=sum(duration_chair_door, na.rm = TRUE)/length(duration_chair_door), prop_chair_window=sum(duration_chair_window, na.rm = TRUE)/length(duration_chair_window), prop_door_l=sum(duration_door_l, na.rm = TRUE)/length(duration_door_l), prop_door_r=sum(duration_door_r, na.rm = TRUE)/length(duration_door_r))%>%
   full_join(area.data)%>%
   full_join(vis.angle.summary.data)%>%
+  full_join(tail.angle.ind.data) %>%
   mutate(min_distance_owner_chair=ifelse(owner_chair=="window",min.distance.chair.window,ifelse(owner_chair=="door", min.distance.chair.door, NA)), mean_distance_owner_chair=ifelse(owner_chair=="window",mean.distance.chair.window,ifelse(owner_chair=="door", mean.distance.chair.door, NA)), prop_look_owner_chair=ifelse(owner_chair=="window",prop_look_chair_window,ifelse(owner_chair=="door", prop_look_chair_door, NA)), prop_look_stranger_chair=ifelse(stranger_chair=="window",prop_look_chair_window,ifelse(stranger_chair=="door", prop_look_chair_door, NA)), mean_vis_angle_stranger=ifelse(stranger_chair=="window",mean_angle_chair_window,ifelse(stranger_chair=="door", mean_angle_chair_door, NA)), mean_vis_angle_owner=ifelse(owner_chair=="window",mean_angle_chair_window,ifelse(owner_chair=="door", mean_angle_chair_door, NA)), min_vis_angle_stranger=ifelse(stranger_chair=="window",min_angle_chair_window,ifelse(stranger_chair=="door", min_angle_chair_door, NA)), min_vis_angle_owner=ifelse(owner_chair=="window",min_angle_chair_window,ifelse(owner_chair=="door", min_angle_chair_door, NA)), prop_duration_owner=ifelse(owner_chair=="window",prop_chair_window,ifelse(owner_chair=="door", prop_chair_door, NA)), prop_duration_stranger=ifelse(stranger_chair=="window",prop_chair_window,ifelse(stranger_chair=="door", prop_chair_door, NA)), prop_duration_door=prop_door_l+prop_door_r)
   
 summary(distance.data)
@@ -476,7 +630,48 @@ p.example
 ggsave(p.example, filename = "graphics/examplary_plot_dawn_bp.png", width = 12,height=6, scale=0.7 )
 
 ```
+addition of tail angle information
+```{r}
 
+p.example2.data_x<-tail.angle.data%>%filter( subject=="dawn" &condition=="bp")%>%
+  select(subject, condition, frame_count, x_approx_roll_tail_tip, x_approx_roll_head_centre)%>%
+  pivot_longer(c(x_approx_roll_tail_tip, x_approx_roll_head_centre), names_to = "name", values_to =  "x_approx_roll")%>%
+  mutate(name=str_remove(name, "x_approx_roll_"))
+
+p.example2.data<-tail.angle.data%>%filter( subject=="dawn" &condition=="bp")%>%
+  select(subject, condition, frame_count, y_approx_roll_tail_tip, y_approx_roll_head_centre)%>%
+  pivot_longer(c(y_approx_roll_tail_tip, y_approx_roll_head_centre), names_to = "name", values_to =  "y_approx_roll")%>%
+  mutate(name=str_remove(name, "y_approx_roll_"))%>%
+  full_join(p.example2.data_x)%>%
+  inner_join(tail.angle.data)
+
+p.example2<-ggplot(data = p.example2.data%>%filter((name=="head_centre"|name=="tail_tip") & subject=="dawn" &condition=="bp"), aes(x=x_approx_roll, y=y_approx_roll))+
+  facet_wrap(~name, labeller=labeller(name=key.labs))+
+  theme_bw()+
+  #scale_fill_viridis() +
+  theme(legend.position = "none")+
+  annotate("rect", xmin=object.data$x[object.data$id=="dl1"], xmax=object.data$x[object.data$id=="dl2"], ymin=object.data$y[object.data$id=="dl1"],ymax=object.data$y[object.data$id=="dl2"], fill="darkgrey", alpha=0.6)+
+    annotate("rect", xmin=object.data$x[object.data$id=="dr1"], xmax=object.data$x[object.data$id=="dr2"], ymin=object.data$y[object.data$id=="dr1"],ymax=object.data$y[object.data$id=="dr2"], fill="darkgrey", alpha=0.6)+
+    annotate("rect", xmin=object.data$x[object.data$id=="wl1"], xmax=object.data$x[object.data$id=="wl2"], ymin=object.data$y[object.data$id=="wl1"],ymax=object.data$y[object.data$id=="wl2"], fill="darkgrey", alpha=0.6)+
+    annotate("rect", xmin=object.data$x[object.data$id=="wr1"], xmax=object.data$x[object.data$id=="wr2"], ymin=object.data$y[object.data$id=="wr1"],ymax=object.data$y[object.data$id=="wr2"], fill="darkgrey", alpha=0.6)+
+        annotate("rect", xmin=object.data$x[object.data$id=="door1"], xmax=object.data$x[object.data$id=="door2"], ymin=object.data$y[object.data$id=="door1"],ymax=object.data$y[object.data$id=="door2"], fill="black", alpha=0.6)+
+    annotate("rect", xmin=object.data$x[object.data$id=="window1"], xmax=object.data$x[object.data$id=="window2"], ymin=object.data$y[object.data$id=="window1"],ymax=object.data$y[object.data$id=="window2"], fill="black", alpha=0.6)+
+annotate("rect", xmin=1.619, xmax=2.466, ymin=3.7,ymax=3.9, fill="darkgreen", alpha=0.8)+#right door
+annotate("rect", xmin=-2.265, xmax=-1.418, ymin=3.7,ymax=3.9, fill="darkgreen", alpha=0.8)+#left door
+    geom_path(alpha=0.2) +
+  geom_point(data=p.example2.data%>%filter((name=="head_centre") & subject=="dawn" &condition=="bp"), alpha=0.05, color="dodgerblue")+
+  geom_point(data=p.example2.data%>%filter((name=="tail_tip") & subject=="dawn" &condition=="bp"), aes(color = tail_angle), alpha=0.15, size = 1) +#
+  scale_color_gradient("Tail angle", low = "yellow", high = "darkblue", breaks=c(-90, 0, 90), labels=c("90 (left)", "0", "90 (right)")) + 
+    theme_bw()+ 
+    ylab("Y coordinates (in m)") + xlab("X coordinates (in m)") + 
+    xlim(-3.5, 3.8) + ylim(-2.7, 4)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), text=element_text(size=14))
+
+
+p.example2
+
+```
 
 ## Head centre - snout distance: comparison between reconstructed and measured values
 ```{r}
