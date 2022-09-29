@@ -21,7 +21,7 @@ source("./functions/boot_glmmTMB.r")
 source("./functions/glmmTMB_stability.r")
 source("./functions/drop1_para_glmmtmb.r")
 source("./functions/extract_ranef_gmmTMB.r")
-load("3d_tracking_manual_scoring_workspace.RData")
+#load("3d_tracking_manual_scoring_workspace.RData")
 ```
 
 
