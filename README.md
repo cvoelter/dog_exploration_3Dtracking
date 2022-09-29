@@ -1,5 +1,5 @@
 # dog_exploration_3Dtracking
-Data and R scripts for the study entitles: "Using machine learning to track dogs’ exploratory behavior in presence and absence of their caregiver"
+Data and R scripts for the study entitles: "Using machine learning to track dogs’ exploratory behaviour in presence and absence of their caregiver"
 
 ## 01_dog_tracking_data_processing.Rmd
 * Data processing (filtering, interpolation, smoothing) and calculation of the summary stats for each trajectory (e.g., interest area durations, area covered, etc.)
