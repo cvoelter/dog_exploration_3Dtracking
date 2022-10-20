@@ -21,7 +21,7 @@ source("./functions/glmmTMB_stability.r")
 source("./functions/drop1_para_glmmtmb.r")
 source("./functions/extract_ranef_gmmTMB.r")
 
-#load("dog_exploration_workspace.RData")
+load("dog_exploration_workspace.RData")
 ```
 
 Notes: Pruning of the models in case of convergence issues in the following order:
@@ -1201,9 +1201,9 @@ ggsave(cormat.all.tasks, filename="graphics/cormat_all_tasks_reduced.png", width
 ```{r}
 library(corrplot)
 
-
-png(file = "graphics/cor_mat.png", width = 30, height=15, units="cm", res=700)
-corrplot(corr[13:16,],method="color",   pch.col = 'grey20', tl.col = 'black')# p.mat = p.mat[13:16,], sig.level = c(0.001, 0.01, 0.05), pch.cex = 0.9, insig = 'label_sig',
+pdf(file = "graphics/cor_mat.pdf", width = 12, height=6)
+#jpeg(file = "graphics/cor_mat.jpg", width = 30, height=15, units="cm", res=1000)
+corrplot(corr[13:16,],method="color",   pch.col = 'grey20', tl.col = 'black', addCoef.col = 'black')# p.mat = p.mat[13:16,], sig.level = c(0.001, 0.01, 0.05), pch.cex = 0.9, insig = 'label_sig',
 
 dev.off()
 
@@ -1513,7 +1513,7 @@ door.duration.plot
 
 ```{r}
 library(cowplot)
-pg2<-plot_grid(distance.plot2, object.distance.plot2, area.plot2, vis.angle.owner.plot2, tail.plot2, tail.angle.plot , ncol=2,  labels=c("A", "B", "C", "D", "E", "F"))
+pg2<-plot_grid(distance.plot2, object.distance.plot2, area.plot2, vis.angle.owner.plot2, tail.plot2, tail.angle.plot , ncol=2,  labels=c("(a)", "(b)", "(c)", "(d)", "(e)", "(f)"), label_x = 0.15, label_y = 0.97, align = "vh")
 
 ggsave(pg2, filename = "graphics/dog_exploration_pg3.png", width=12, height=18, scale=0.85)
 ggsave(pg2, filename = "graphics/dog_exploration_pg3.pdf", width=12, height=18, scale=0.85)
@@ -1522,15 +1522,15 @@ ggsave(pg2, filename = "graphics/dog_exploration_pg3.pdf", width=12, height=18, 
 ```{r}
 
 library(cowplot)
-pg3<-plot_grid(owner.duration.plot , stranger.duration.plot , door.duration.plot , nrow=1,  labels=c("B", "C", "D"), label_size = 20)
+pg3<-plot_grid(owner.duration.plot , stranger.duration.plot , door.duration.plot , nrow=1,  labels=c("(b)", "(c)", "(d)"), label_size = 20, label_x = 0.16, label_y = 0.99, align = "vh")
 
 #execute script in 01_dog_tracking_data_processing
 #pg4<-plot_grid(p3, pg3, ncol=2,  labels=c("A", ""), rel_widths =c(1, 0.35), label_size = 20 )
-pg4<-plot_grid(p3, pg3, nrow=2,  labels=c("A", ""), rel_heights = c(1, 0.5), label_size = 20 )
+pg4<-plot_grid(p3, pg3, nrow=2,  labels=c("(a)", ""), rel_heights = c(1, 0.5), label_size = 20, label_x = 0.05, label_y = 0.96, align = "vh")
 
 ggsave(pg4, filename = "graphics/dog_exploration_duration_pg4.png", width=11, height=13, scale=1.1)
 
-ggsave(pg4, filename = "graphics/dog_exploration_duration_pg4.pdf", width=11, height=13, scale=1.1)
+ggsave(pg4, filename = "graphics/dog_exploration_duration_pg4.jpg", width=11, height=13, scale=1.1, dpi=1000)
 ```
 
 
@@ -1569,7 +1569,7 @@ cormat.all.tasks<- ggcorrplot(corr, hc.order = FALSE,
     axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1),
     axis.title.x = element_blank(),
     axis.title.y = element_blank(),
-    plot.margin = unit(c(9, 1, 0, 0), "mm")
+    plot.margin = unit(c(1, 1, 0, 0), "mm")
   )
 cormat.all.tasks
 
@@ -1581,10 +1581,10 @@ ggsave(cormat.all.tasks, filename = "graphics/distance_corplot.png", width=6, he
 ```{r}
 library(cowplot)
 #execute script in 01_dog_tracking_data_processing
-pg5<-plot_grid(hs_plot2, cormat.all.tasks, labels = c("B", "C"), rel_widths = c(1,1.3))
-pg6<-plot_grid(p.example2, pg5, labels = c("A", ""), nrow=2, rel_heights = c(1,1.3))
+pg5<-plot_grid(hs_plot2, cormat.all.tasks, labels = c("(b)", "(c)"), rel_widths = c(1,1.3), label_x = c(0.17, 0.2), label_y = 0.97, align = "t")
+pg6<-plot_grid(p.example2, pg5, labels = c("(a)", ""), nrow=2, rel_heights = c(1,1.3), label_x = 0.06, label_y = 0.91)
 
-ggsave(pg6, filename = "graphics/validation_pg.png", width=10, height=10, scale=0.8)
+ggsave(pg6, filename = "graphics/validation_pg.jpg", width=10, height=10, scale=0.8, dpi=1000)
 ggsave(pg6, filename = "graphics/validation_pg.pdf", width=10, height=10, scale=0.8)
 ```
 
